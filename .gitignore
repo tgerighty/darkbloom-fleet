@@ -1,0 +1,22 @@
+# Secrets - never commit these. This repo is public.
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*credentials*
+*secret*
+*.p12
+*_token
+.ssh/
+
+# Common
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+*.db
+*.sqlite3
+.DS_Store
