@@ -9,9 +9,10 @@ import time
 
 from psycopg_pool import ConnectionPool
 
-from . import db, decision as decision_mod, demand, remote, scoring
+from . import db, demand, remote, scoring
+from . import decision as decision_mod
 from .config import Config
-from .types import DaemonState
+from .types import CapacitySample, DaemonState, Decision, Guardrails, Outcome
 
 log = logging.getLogger("fleet.collector")
 
@@ -24,7 +25,7 @@ def _fetch_daemon(cfg: Config, now: float) -> DaemonState | None:
         return None
 
 
-def _fetch_scores(cfg: Config) -> tuple[dict, dict[str, float]]:
+def _fetch_scores(cfg: Config) -> tuple[dict[str, CapacitySample], dict[str, float]]:
     """Returns (capacity samples by model, resolved price by model)."""
     try:
         samples = demand.fetch_capacity(cfg.base_url)
@@ -51,20 +52,19 @@ def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
     db.insert_payouts(pool, host, payouts, now)
 
 
-def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: DaemonState | None, now: float):
+def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: DaemonState | None, now: float) -> Decision:
     host = cfg.host_label
     current = daemon.current_model if daemon and daemon.fresh else None
     anchor = db.dwell_anchor(pool, host, daemon.started_at if daemon else 0.0)
-    return decision_mod.decide(
-        ema, current, anchor, now,
-        inference_active=bool(daemon and daemon.inference_active),
+    guardrails = Guardrails(
         relative_margin=cfg.relative_margin, absolute_margin=cfg.absolute_margin,
         switch_cost_seconds=cfg.switch_cost_seconds, decision_horizon_seconds=cfg.decision_horizon_seconds,
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
+    return decision_mod.decide(ema, current, anchor, now, bool(daemon and daemon.inference_active), guardrails)
 
 
-def _maybe_execute(cfg: Config, pool: ConnectionPool, decision, daemon: DaemonState | None, now: float) -> tuple[bool, str | None]:
+def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: float) -> tuple[bool, str | None]:
     """Live mode only. Returns (executed, error)."""
     if decision.action != "SWITCH" or not cfg.live_execution:
         return False, None
@@ -81,23 +81,26 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision, daemon: DaemonSt
     return True, None
 
 
-def _maybe_launch_fast_poll(cfg: Config, decision, now: float) -> None:
+def _maybe_launch_fast_poll(cfg: Config, decision: Decision) -> None:
     """A SWITCH_WHEN_IDLE decision means the challenger already clears every
     gate except idle. Waiting out the rest of this ~60s poll cycle risks
     missing a narrow idle gap that opens and closes between ticks - exactly
     what missed 8 consecutive ticks in a row on the real host (see README) -
     so launch the self-locking 1s-poll watcher on the remote host instead;
     it re-checks the live recommendation every second and switches the
-    instant a gap opens."""
-    if decision.action != "SWITCH_WHEN_IDLE":
-        return
+    instant a gap opens. Any other decision clears the watcher's target, so a
+    watcher still running from an earlier tick cannot act on a stale one."""
     if not cfg.live_execution:
-        log.info("observe mode: would launch fast-poll watcher for target %s", decision.target)
+        if decision.action == "SWITCH_WHEN_IDLE":
+            log.info("observe mode: would launch fast-poll watcher for target %s", decision.target)
         return
     try:
-        remote.launch_fast_switch_watcher(cfg, decision.target, max_seconds=max(5.0, cfg.poll_interval_seconds - 5))
+        if decision.action == "SWITCH_WHEN_IDLE":
+            remote.launch_fast_switch_watcher(cfg, decision.target, max_seconds=max(5.0, cfg.poll_interval_seconds - 5))
+        else:
+            remote.clear_fast_switch_target(cfg)
     except Exception as error:  # noqa: BLE001 - one bad tick must not kill the loop
-        log.warning("failed to launch fast-poll watcher: %s", error)
+        log.warning("fast-poll watcher control failed: %s", error)
 
 
 def run_tick(cfg: Config, pool: ConnectionPool) -> None:
@@ -121,8 +124,9 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     _ingest_earnings(cfg, pool, now)
 
     result = _decide(cfg, pool, ema, daemon, now)
-    executed, error = _maybe_execute(cfg, pool, result, daemon, now)
-    _maybe_launch_fast_poll(cfg, result, now)
+    executed, error = _maybe_execute(cfg, pool, result, now)
+    _maybe_launch_fast_poll(cfg, result)
     mode = "live" if cfg.live_execution else "observe"
-    db.insert_decision(pool, host, now, daemon.current_model if daemon else None, result, mode, executed, error)
-    log.info("[%s] %s -> %s (%s): %s", mode, daemon.current_model if daemon else "?", result.target, result.action, result.reason)
+    current_model = daemon.current_model if daemon else None
+    db.insert_decision(pool, host, now, current_model, result, Outcome(mode, executed, error))
+    log.info("[%s] %s -> %s (%s): %s", mode, current_model or "?", result.target, result.action, result.reason)

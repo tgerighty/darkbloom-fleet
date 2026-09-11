@@ -23,7 +23,10 @@ services:
     ports:
       - "${FLEET_DASHBOARD_PORT:-8080}:8080"
     environment:
-      DATABASE_URL: postgresql://darkbloom_fleet:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/darkbloom_fleet
+      # libpq reads PGPASSWORD itself, so a password with URI-reserved
+      # characters never has to be escaped into DATABASE_URL.
+      DATABASE_URL: postgresql://darkbloom_fleet@db:5432/darkbloom_fleet
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       # One block of DARKBLOOM_HOST_<N>_* per managed Mac. N starts at 1 and
       # must be contiguous - the app stops discovering hosts at the first gap.
       DARKBLOOM_HOST_1_SSH_TARGET: ${DARKBLOOM_HOST_1_SSH_TARGET:?set DARKBLOOM_HOST_1_SSH_TARGET in .env}
@@ -39,6 +42,7 @@ services:
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
       FLEET_LIVE_EXECUTION: ${FLEET_LIVE_EXECUTION:-false}
       FLEET_DASHBOARD_PORT: "8080"
+      FLEET_BIND_HOST: "0.0.0.0"
     volumes:
       # SSH config + key + known_hosts for the managed host, mounted read-only.
       # Never bake these into the image or commit them — see .gitignore.

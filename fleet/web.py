@@ -6,6 +6,7 @@ see config.load_configs for why the rest of the app stays single-host-shaped.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,11 +23,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        tasks = [asyncio.create_task(run_forever(cfg, pool)) for cfg in configs]
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        stop = asyncio.Event()
+        tasks = [asyncio.create_task(run_forever(cfg, pool, stop)) for cfg in configs]
         yield
-        for task in tasks:
-            task.cancel()
+        stop.set()
+        # Let a tick already in its thread finish: main() closes the pool next.
+        await asyncio.gather(*tasks)
 
     app = FastAPI(title="darkbloom-fleet", lifespan=lifespan)
 
@@ -34,8 +37,10 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "dashboard.html")
 
-    @app.get("/api/status")
-    async def status() -> dict:
+    # response_model=None: the rows are plain dicts; FastAPI must not build a
+    # validation model from the annotation.
+    @app.get("/api/status", response_model=None)
+    async def status() -> dict[str, list[queries.Row]]:
         statuses = await asyncio.gather(*(asyncio.to_thread(queries.build_status, cfg, pool) for cfg in configs))
         return {"hosts": list(statuses)}
 

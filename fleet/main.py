@@ -5,6 +5,7 @@ web.py's lifespan hook).
 from __future__ import annotations
 
 import logging
+import os
 
 import uvicorn
 
@@ -24,7 +25,7 @@ def main() -> None:
         log.info("starting in %s mode for host %r", mode, cfg.host_label)
     app = create_app(configs, pool)
     try:
-        uvicorn.run(app, host="0.0.0.0", port=configs[0].dashboard_port)
+        uvicorn.run(app, host=os.environ.get("FLEET_BIND_HOST", "127.0.0.1"), port=configs[0].dashboard_port)
     finally:
         pool.close()
 

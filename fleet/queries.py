@@ -4,15 +4,17 @@ writes so each file stays small and single-purpose.
 from __future__ import annotations
 
 import time
+from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
 
 from .config import Config
 
 DAY_SECONDS = 86_400
+Row = dict[str, object]
 
 
-def latest_demand_table(pool: ConnectionPool, host: str) -> list[dict]:
+def latest_demand_table(pool: ConnectionPool, host: str) -> list[Row]:
     """Most recent sample per model, newest first by score."""
     with pool.connection() as conn:
         rows = conn.execute(
@@ -24,7 +26,7 @@ def latest_demand_table(pool: ConnectionPool, host: str) -> list[dict]:
     return sorted(rows, key=lambda r: r["ema_score"] or 0, reverse=True)
 
 
-def latest_daemon(pool: ConnectionPool, host: str) -> dict | None:
+def latest_daemon(pool: ConnectionPool, host: str) -> Row | None:
     with pool.connection() as conn:
         return conn.execute(
             "SELECT * FROM daemon_snapshots WHERE host = %s ORDER BY observed_at DESC LIMIT 1", (host,)
@@ -40,7 +42,7 @@ def earnings_usd(pool: ConnectionPool, host: str, since: float) -> float:
     return float(row["total"]) / 1_000_000
 
 
-def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[dict]:
+def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[Row]:
     with pool.connection() as conn:
         return conn.execute(
             "SELECT observed_at, current_model, target_model, action, reason, mode, executed, error "
@@ -62,7 +64,7 @@ def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float) -
     if len(rows) < 2:
         return {}
     totals: dict[str, float] = {}
-    for prev, nxt in zip(rows, rows[1:]):
+    for prev, nxt in pairwise(rows):
         gap = nxt["observed_at"] - prev["observed_at"]
         if prev["current_model"] and 0 < gap < 600:  # skip outage gaps > 10min
             totals[prev["current_model"]] = totals.get(prev["current_model"], 0.0) + gap
@@ -70,7 +72,7 @@ def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float) -
     return {model: round(100 * seconds / covered, 1) for model, seconds in totals.items()} if covered else {}
 
 
-def build_status(cfg: Config, pool: ConnectionPool) -> dict:
+def build_status(cfg: Config, pool: ConnectionPool) -> Row:
     host = cfg.host_label
     daemon = latest_daemon(pool, host)
     now = time.time()

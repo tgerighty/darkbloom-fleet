@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 
-from .types import Decision
+from .types import Decision, Guardrails
 
 
 def update_ema(ema: dict[str, float], scores: dict[str, float], dt_seconds: float, tau_minutes: float) -> dict[str, float]:
@@ -36,12 +36,7 @@ def decide(
     last_switch_at: float,
     now: float,
     inference_active: bool,
-    *,
-    relative_margin: float,
-    absolute_margin: float,
-    switch_cost_seconds: float,
-    decision_horizon_seconds: float,
-    min_dwell_seconds: float,
+    guardrails: Guardrails,
 ) -> Decision:
     """Same switch-cost discount and margins as warm_model_manager's
     choose_scored_target(), applied to the EMA instead of a raw pressure
@@ -52,7 +47,8 @@ def decide(
         best = max(ema, key=ema.get)
         return Decision(best, f"no eligible current model; highest smoothed score {ema[best]:.3f}", "SWITCH")
 
-    discount = max(0.0, (decision_horizon_seconds - switch_cost_seconds) / decision_horizon_seconds)
+    horizon = guardrails.decision_horizon_seconds
+    discount = max(0.0, (horizon - guardrails.switch_cost_seconds) / horizon)
     adjusted = {m: (v if m == current_model else v * discount) for m, v in ema.items()}
     challenger = max(adjusted, key=adjusted.get)
     if challenger == current_model:
@@ -60,15 +56,15 @@ def decide(
 
     current_score = ema[current_model]
     challenger_score = adjusted[challenger]
-    need = max(current_score * (1 + relative_margin), current_score + absolute_margin)
+    need = max(current_score * (1 + guardrails.relative_margin), current_score + guardrails.absolute_margin)
     if challenger_score < need:
         return Decision(
             current_model,
             f"{challenger} below margin ({challenger_score:.3f} vs current {current_score:.3f}; need >= {need:.3f})",
             "KEEP",
         )
-    if now - last_switch_at < min_dwell_seconds:
-        remaining = min_dwell_seconds - (now - last_switch_at)
+    if now - last_switch_at < guardrails.min_dwell_seconds:
+        remaining = guardrails.min_dwell_seconds - (now - last_switch_at)
         return Decision(current_model, f"{challenger} clears margin but minimum dwell has {remaining:.0f}s left", "KEEP")
     if inference_active:
         return Decision(

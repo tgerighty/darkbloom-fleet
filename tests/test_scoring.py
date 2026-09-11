@@ -16,6 +16,14 @@ def test_pressure_from_capacity_skips_rows_without_an_id():
     assert pressure_from_capacity({"active_requests": 1, "warm_providers": 1}) is None
 
 
+def test_pressure_from_capacity_skips_rows_with_non_numeric_counts():
+    assert pressure_from_capacity({"id": "m", "active_requests": "many", "warm_providers": 1}) is None
+
+
+def test_pressure_from_capacity_skips_rows_that_are_not_objects():
+    assert pressure_from_capacity("gpt-oss-20b") is None
+
+
 def test_compute_scores_matches_pressure_times_price_times_weight():
     samples = {
         "qwen3.5-35b-a3b": CapacitySample("qwen3.5-35b-a3b", 4, 2, 2.0),

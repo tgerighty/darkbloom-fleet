@@ -5,16 +5,16 @@ warm_model_manager.py's fetch_output_prices() — stdlib only, no SSH needed.
 from __future__ import annotations
 
 import json
-from typing import Any
 from urllib.request import Request, urlopen
 
 from .scoring import pressure_from_capacity
 from .types import CapacitySample
 
 USER_AGENT = "darkbloom-fleet/0.1"
+Json = dict[str, object] | list[object]
 
 
-def _get_json(url: str) -> Any:
+def _get_json(url: str) -> Json:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
     with urlopen(request, timeout=20) as response:
         return json.load(response)
@@ -39,7 +39,10 @@ def fetch_output_prices(pricing_url: str) -> tuple[dict[str, float], float]:
     prices: dict[str, float] = {}
     for row in payload.get("prices") or []:
         if isinstance(row, dict) and row.get("model"):
-            prices[str(row["model"])] = max(0, int(row.get("output_price") or 0)) / 1_000_000
+            try:
+                prices[str(row["model"])] = max(0, int(row.get("output_price") or 0)) / 1_000_000
+            except (TypeError, ValueError):
+                continue  # one malformed row must not drop every price
     return prices, fallback
 
 

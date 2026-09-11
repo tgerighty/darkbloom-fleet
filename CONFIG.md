@@ -43,7 +43,7 @@ Access. It has no login of its own, so never publish it without Access.
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Postgres connection string. `docker-compose.yml` builds it from `POSTGRES_PASSWORD`; the Swarm stack gives it without a password and sets `DATABASE_PASSWORD_FILE`. |
+| `DATABASE_URL` | Postgres connection string, without the password: `docker-compose.yml` passes `POSTGRES_PASSWORD` as `PGPASSWORD`, and the Swarm stack sets `DATABASE_PASSWORD_FILE`. |
 | `DARKBLOOM_HOST_1_SSH_TARGET` | SSH alias for the first managed Mac, resolved through the SSH config. Never a literal address in this repo. |
 | `POSTGRES_PASSWORD` | Local docker compose only: Postgres password, generated locally, never committed. |
 
@@ -67,6 +67,7 @@ Shared by every host:
 |---|---|---|
 | `DATABASE_PASSWORD_FILE` | unset | File holding the Postgres password (a Swarm secret), merged into `DATABASE_URL`. |
 | `DARKBLOOM_SSH_CONFIG` | unset | SSH config passed to every `ssh` call with `-F` (a Swarm secret on the cluster). |
+| `FLEET_BIND_HOST` | `127.0.0.1` | Address the dashboard binds to. Containers set `0.0.0.0` so Docker can reach it. |
 | `DARKBLOOM_BASE_URL` | `https://api.darkbloom.dev` | Public demand-capacity API base. |
 | `DARKBLOOM_PRICING_URL` | `https://api.darkbloom.dev/v1/pricing` | Public output-token pricing endpoint. |
 | `POLL_INTERVAL_SECONDS` | `60` | Ingestion + decision cadence. |
@@ -148,9 +149,7 @@ it would launch.
 
 - **Local model-availability discovery** (`darkbloom models list --all` over
   SSH): the source project uses this to auto-exclude models that aren't
-  downloaded on the host. v1 instead scores a fixed configured list
-  (`DARKBLOOM_MODELS`) - correct as long as that list matches what's actually
-  downloaded, which a single operator can verify once at setup. Multi-host
-  fleets will need this back; tracked as follow-up work, not built now.
-- **Multi-host and LLM-driven decisions**: explicitly out of v1 scope per the
-  brainstorm - the schema, config, and code are single-host throughout.
+  downloaded on the host. Each host instead scores a fixed configured list
+  (`DARKBLOOM_HOST_<N>_MODELS`) - correct as long as that list matches what's
+  actually downloaded on that Mac, which the operator verifies at setup.
+- **LLM-driven decisions**: out of scope; decisions use the scored formula.

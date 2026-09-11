@@ -1,5 +1,6 @@
 """The FLEET_LIVE_EXECUTION guards raise before touching subprocess/SSH; the
-ssh command-line test swaps subprocess.run, so none of this needs a network."""
+command-line tests swap subprocess.run or _run_ssh, so none of this needs a
+network."""
 import dataclasses
 import subprocess
 
@@ -30,6 +31,11 @@ def test_launch_fast_switch_watcher_refuses_without_live_execution():
         remote.launch_fast_switch_watcher(_cfg(live_execution=False), "a", max_seconds=55.0)
 
 
+def test_clear_fast_switch_target_refuses_without_live_execution():
+    with pytest.raises(RuntimeError, match="FLEET_LIVE_EXECUTION"):
+        remote.clear_fast_switch_target(_cfg(live_execution=False))
+
+
 def test_run_ssh_uses_the_configured_ssh_config_file(monkeypatch):
     seen = {}
 
@@ -44,3 +50,16 @@ def test_run_ssh_uses_the_configured_ssh_config_file(monkeypatch):
     command = seen["command"]
     assert command[command.index("-F") + 1] == "/run/secrets/ssh_config"
     assert command[-2:] == ["host", "true"]
+
+
+def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monkeypatch):
+    commands = []
+    monkeypatch.setattr(remote, "_run_ssh", lambda cfg, command, timeout: commands.append(command) or "")
+
+    remote.launch_fast_switch_watcher(_cfg(live_execution=True), "a", max_seconds=55.0)
+
+    lines = commands[0].splitlines()
+    launch = next(i for i, line in enumerate(lines) if line.startswith("nohup "))
+    moves = [i for i, line in enumerate(lines) if line.startswith("mv -f ")]
+    assert lines[0] == "set -e"
+    assert len(moves) == 2 and max(moves) < launch

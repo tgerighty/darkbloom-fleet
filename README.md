@@ -71,8 +71,9 @@ happened and why.
   minimum dwell, idle-gating before any real restart, and a 30-second
   restart-retry backoff after a failed switch attempt. Defaults and
   rationale are in `CONFIG.md`.
-- **Deployment**: v1 ships as `docker-compose.yml` (one app container + one
-  Postgres container) - not a Swarm stack yet. See "Running locally" below.
+- **Deployment**: the cluster runs the Swarm stack in `deploy/stack.yml`,
+  released by nxio-deploy (see CONFIG.md "Running on the cluster");
+  `docker-compose.yml` runs the same app locally.
 - **Credentials**: SSH target, key, and host identity all come from
   environment variables or a mounted `./secrets/ssh` directory - never
   committed. See `.gitignore` and `CONFIG.md`.

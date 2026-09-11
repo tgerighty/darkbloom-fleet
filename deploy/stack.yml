@@ -68,6 +68,8 @@ services:
       FLEET_LIVE_EXECUTION: "false"
       POLL_INTERVAL_SECONDS: "60"
       PYTHONDONTWRITEBYTECODE: "1"
+      # The container's own interface; only the overlay networks reach it.
+      FLEET_BIND_HOST: "0.0.0.0"
     # mode 256 = 0400, owned by the image's appuser: ssh refuses a readable key.
     secrets:
       - source: darkbloom_fleet_db_password

@@ -36,3 +36,19 @@ class Decision:
     target: str | None
     reason: str
     action: str  # KEEP | SWITCH | SWITCH_WHEN_IDLE | WOULD_SWITCH | WAIT | BLOCKED
+
+
+@dataclass(frozen=True)
+class Guardrails:
+    relative_margin: float
+    absolute_margin: float
+    switch_cost_seconds: float
+    decision_horizon_seconds: float
+    min_dwell_seconds: float
+
+
+@dataclass(frozen=True)
+class Outcome:
+    mode: str  # live | observe
+    executed: bool
+    error: str | None

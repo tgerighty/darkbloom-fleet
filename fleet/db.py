@@ -7,7 +7,7 @@ from __future__ import annotations
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from .types import CapacitySample, DaemonState, Decision, Payout
+from .types import CapacitySample, DaemonState, Decision, Outcome, Payout
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS demand_samples (
@@ -173,11 +173,11 @@ def last_failed_switch_at(pool: ConnectionPool, host: str) -> float:
 
 
 def insert_decision(pool: ConnectionPool, host: str, observed_at: float, current_model: str | None,
-                     decision: Decision, mode: str, executed: bool, error: str | None) -> None:
+                     decision: Decision, outcome: Outcome) -> None:
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO decisions (host, observed_at, current_model, target_model, action, reason, "
             "mode, executed, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, current_model, decision.target, decision.action, decision.reason,
-             mode, executed, error),
+             outcome.mode, outcome.executed, outcome.error),
         )
