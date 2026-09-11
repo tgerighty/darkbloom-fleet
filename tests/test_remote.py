@@ -1,5 +1,8 @@
-"""Only the FLEET_LIVE_EXECUTION guard is tested here: both functions raise
-before ever touching subprocess/SSH, so this needs no network and no mocking."""
+"""The FLEET_LIVE_EXECUTION guards raise before touching subprocess/SSH; the
+ssh command-line test swaps subprocess.run, so none of this needs a network."""
+import dataclasses
+import subprocess
+
 import pytest
 
 from fleet import remote
@@ -25,3 +28,19 @@ def test_execute_switch_refuses_without_live_execution():
 def test_launch_fast_switch_watcher_refuses_without_live_execution():
     with pytest.raises(RuntimeError, match="FLEET_LIVE_EXECUTION"):
         remote.launch_fast_switch_watcher(_cfg(live_execution=False), "a", max_seconds=55.0)
+
+
+def test_run_ssh_uses_the_configured_ssh_config_file(monkeypatch):
+    seen = {}
+
+    def fake_run(command, **_kwargs):
+        seen["command"] = command
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(remote.subprocess, "run", fake_run)
+    cfg = dataclasses.replace(_cfg(live_execution=False), ssh_config_path="/run/secrets/ssh_config")
+
+    assert remote._run_ssh(cfg, "true", timeout=1) == "ok"
+    command = seen["command"]
+    assert command[command.index("-F") + 1] == "/run/secrets/ssh_config"
+    assert command[-2:] == ["host", "true"]

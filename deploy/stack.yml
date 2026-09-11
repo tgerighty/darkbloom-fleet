@@ -1,0 +1,145 @@
+# Deployed by nxio-deploy (see deploy.yml). SSH targets are aliases; the real
+# addresses, user names and key live only in the external Swarm secrets.
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    environment:
+      PGDATA: /var/lib/postgresql/18/docker
+      POSTGRES_DB: darkbloom_fleet
+      POSTGRES_USER: darkbloom_fleet
+      POSTGRES_PASSWORD_FILE: /run/secrets/darkbloom_fleet_db_password
+    secrets:
+      - darkbloom_fleet_db_password
+    volumes:
+      - type: bind
+        source: /mnt/gluster/apps/darkbloom-fleet/pgdata
+        target: /var/lib/postgresql
+    networks:
+      - fleet_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U darkbloom_fleet -d darkbloom_fleet"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        max_replicas_per_node: 1
+        constraints:
+          - node.labels.gluster == true
+          - node.labels.gluster_local == true
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 60s
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  fleet:
+    image: zillon/darkbloom-fleet:${IMAGE_VERSION:-latest}
+    environment:
+      DATABASE_URL: postgresql://darkbloom_fleet@postgres:5432/darkbloom_fleet
+      DATABASE_PASSWORD_FILE: /run/secrets/darkbloom_fleet_db_password
+      DARKBLOOM_SSH_CONFIG: /run/secrets/darkbloom_fleet_ssh_config
+      DARKBLOOM_HOST_1_SSH_TARGET: m3-48-1
+      DARKBLOOM_HOST_1_LABEL: m3-48-1
+      DARKBLOOM_HOST_1_SPEC: Apple M3 Max, 48GB RAM, 40 GPU cores
+      DARKBLOOM_HOST_2_SSH_TARGET: M1-64-1
+      DARKBLOOM_HOST_2_LABEL: M1-64-1
+      DARKBLOOM_HOST_2_SPEC: Apple M1 Max, 64GB RAM, 24 GPU cores
+      DARKBLOOM_HOST_2_MODELS: Qwen3.5-9B,gpt-oss-20b,gemma-4-26b-qat-4bit,qwen3-vl-30b-a3b-instruct,nvidia-nemotron-3.5-lightning,qwen3.5-35b-a3b,qwen3.6-35b-a3b-vl-mtp-mxfp8,gemma-4-26b,gemma-4-26b-8bit
+      # Observe only: the fleet records recommendations and never switches.
+      FLEET_LIVE_EXECUTION: "false"
+      POLL_INTERVAL_SECONDS: "60"
+      PYTHONDONTWRITEBYTECODE: "1"
+    # mode 256 = 0400, owned by the image's appuser: ssh refuses a readable key.
+    secrets:
+      - source: darkbloom_fleet_db_password
+        uid: "1000"
+        gid: "1000"
+        mode: 256
+      - source: darkbloom_fleet_ssh_key
+        uid: "1000"
+        gid: "1000"
+        mode: 256
+      - source: darkbloom_fleet_ssh_config
+        uid: "1000"
+        gid: "1000"
+        mode: 256
+      - source: darkbloom_fleet_ssh_known_hosts
+        uid: "1000"
+        gid: "1000"
+        mode: 256
+    networks:
+      - nginx_network
+      - fleet_internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      replicas: 1
+      placement:
+        max_replicas_per_node: 1
+        constraints:
+          - node.labels.production == true
+          - node.labels.stateless == true
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 120s
+        # stop-first: two overlapping tasks would both write the same decisions.
+        order: stop-first
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 96M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+networks:
+  nginx_network:
+    external: true
+  fleet_internal:
+    driver: overlay
+
+secrets:
+  darkbloom_fleet_db_password:
+    external: true
+  darkbloom_fleet_ssh_key:
+    external: true
+  darkbloom_fleet_ssh_config:
+    external: true
+  darkbloom_fleet_ssh_known_hosts:
+    external: true

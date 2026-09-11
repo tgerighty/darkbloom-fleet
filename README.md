@@ -106,18 +106,15 @@ collector only logs what it would launch.
 
 ## Deferred to a follow-up (explicitly out of v1 scope)
 
-- Multi-host support (schema and code are single-host; `host` is a config
-  label, not a table to join against yet).
 - LLM-driven decision-making (today's heuristic is the scored formula above).
-- Discovering which models are actually downloaded/loadable on the host via
-  `darkbloom models list` over SSH - v1 scores a fixed configured model list
-  (`DARKBLOOM_MODELS`) instead.
-- A Docker Swarm stack manifest for this cluster.
+- Discovering which models are actually downloaded/loadable on each host via
+  `darkbloom models list` over SSH - each host scores a fixed configured model
+  list (`DARKBLOOM_HOST_<N>_MODELS`) instead.
 
 ## Running locally
 
 ```bash
-cp .env.example .env            # fill in DARKBLOOM_SSH_TARGET, POSTGRES_PASSWORD
+cp .env.example .env            # fill in POSTGRES_PASSWORD and DARKBLOOM_HOST_1_*
 mkdir -p secrets/ssh             # SSH config + key + known_hosts for the host
 docker compose up --build
 # dashboard: http://localhost:8080

@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from psycopg.conninfo import make_conninfo
 
 # Guardrail defaults below are the values validated in the darkbloom-manager
 # project's 2026-09-11 backtest (54.5h of real earnings-ledger data). See
@@ -55,30 +58,38 @@ class Config:
     base_url: str
     pricing_url: str
     dashboard_port: int
+    ssh_config_path: str | None = None
+
+
+def _database_url() -> str:
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is required (postgres connection string)")
+    password_file = os.environ.get("DATABASE_PASSWORD_FILE")
+    if password_file:
+        url = make_conninfo(url, password=Path(password_file).read_text().strip())
+    return url
 
 
 def load_configs() -> tuple[Config, ...]:
     # Hosts are DARKBLOOM_HOST_1_*, _2_*, ... until the first missing SSH_TARGET.
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is required (postgres connection string)")
-
-    shared = dict(
-        database_url=database_url,
-        poll_interval_seconds=_float_env("POLL_INTERVAL_SECONDS", 60.0),
-        weights=dict(DEFAULT_WEIGHTS),
-        ema_tau_minutes=_float_env("FLEET_EMA_TAU_MINUTES", 20.0),
-        relative_margin=_float_env("FLEET_RELATIVE_MARGIN", 0.25),
-        absolute_margin=_float_env("FLEET_ABSOLUTE_MARGIN", 0.01),
-        switch_cost_seconds=_float_env("FLEET_SWITCH_COST_SECONDS", 300.0),
-        decision_horizon_seconds=_float_env("FLEET_DECISION_HORIZON_SECONDS", 3600.0),
-        min_dwell_seconds=_float_env("FLEET_MIN_DWELL_SECONDS", 1800.0),
-        daemon_freshness_seconds=_float_env("FLEET_DAEMON_FRESHNESS_SECONDS", 90.0),
-        restart_backoff_seconds=_float_env("FLEET_RESTART_BACKOFF_SECONDS", 30.0),
-        base_url=os.environ.get("DARKBLOOM_BASE_URL", "https://api.darkbloom.dev"),
-        pricing_url=os.environ.get("DARKBLOOM_PRICING_URL", "https://api.darkbloom.dev/v1/pricing"),
-        dashboard_port=int(os.environ.get("FLEET_DASHBOARD_PORT", "8080")),
-    )
+    shared = {
+        "database_url": _database_url(),
+        "ssh_config_path": os.environ.get("DARKBLOOM_SSH_CONFIG") or None,
+        "poll_interval_seconds": _float_env("POLL_INTERVAL_SECONDS", 60.0),
+        "weights": dict(DEFAULT_WEIGHTS),
+        "ema_tau_minutes": _float_env("FLEET_EMA_TAU_MINUTES", 20.0),
+        "relative_margin": _float_env("FLEET_RELATIVE_MARGIN", 0.25),
+        "absolute_margin": _float_env("FLEET_ABSOLUTE_MARGIN", 0.01),
+        "switch_cost_seconds": _float_env("FLEET_SWITCH_COST_SECONDS", 300.0),
+        "decision_horizon_seconds": _float_env("FLEET_DECISION_HORIZON_SECONDS", 3600.0),
+        "min_dwell_seconds": _float_env("FLEET_MIN_DWELL_SECONDS", 1800.0),
+        "daemon_freshness_seconds": _float_env("FLEET_DAEMON_FRESHNESS_SECONDS", 90.0),
+        "restart_backoff_seconds": _float_env("FLEET_RESTART_BACKOFF_SECONDS", 30.0),
+        "base_url": os.environ.get("DARKBLOOM_BASE_URL", "https://api.darkbloom.dev"),
+        "pricing_url": os.environ.get("DARKBLOOM_PRICING_URL", "https://api.darkbloom.dev/v1/pricing"),
+        "dashboard_port": int(os.environ.get("FLEET_DASHBOARD_PORT", "8080")),
+    }
     default_live = _bool_env("FLEET_LIVE_EXECUTION", False)
 
     configs: list[Config] = []

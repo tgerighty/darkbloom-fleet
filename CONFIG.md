@@ -4,12 +4,13 @@
 
 ```bash
 cp .env.example .env
-# edit .env: set DARKBLOOM_SSH_TARGET, POSTGRES_PASSWORD, DARKBLOOM_HOST_LABEL/SPEC
+# edit .env: set POSTGRES_PASSWORD and the DARKBLOOM_HOST_1_* block
+# (add a DARKBLOOM_HOST_2_* block for a second Mac)
 
 mkdir -p secrets/ssh
-# put a config, an identity file, and known_hosts for the managed host here.
-# chmod 600 the key. DARKBLOOM_SSH_TARGET should name an alias defined in
-# secrets/ssh/config, so no real hostname needs to appear in .env either.
+# put a config, an identity file, and known_hosts for the managed hosts here.
+# chmod 600 the key. Each DARKBLOOM_HOST_<N>_SSH_TARGET should name an alias
+# defined in secrets/ssh/config, so no real hostname appears in .env either.
 
 docker compose up --build
 ```
@@ -20,23 +21,52 @@ data persists in the `fleet_pgdata` named volume across restarts.
 Tests (pure functions, no database needed): `pip install -r requirements.txt
 pytest && pytest`.
 
+## Running on the cluster
+
+nxio-deploy releases every push to `main` (`deploy.yml`, `deploy/stack.yml`).
+It builds `zillon/darkbloom-fleet`, pins image digests, runs the cluster stack
+linter and deploys stack `darkbloom-fleet`. Postgres keeps its data on Gluster
+at `/mnt/gluster/apps/darkbloom-fleet/pgdata`. Create these external Swarm
+secrets once, on a manager:
+
+| Secret | Contents |
+|---|---|
+| `darkbloom_fleet_db_password` | Random Postgres password. |
+| `darkbloom_fleet_ssh_key` | Private key the Macs accept. |
+| `darkbloom_fleet_ssh_config` | One `Host` block per alias, plus `IdentityFile /run/secrets/darkbloom_fleet_ssh_key`, `UserKnownHostsFile /run/secrets/darkbloom_fleet_ssh_known_hosts` and `StrictHostKeyChecking yes`. |
+| `darkbloom_fleet_ssh_known_hosts` | Host keys for every alias. |
+
+The dashboard is served at `https://darkbloom.nxio.ai` behind Cloudflare
+Access. It has no login of its own, so never publish it without Access.
+
 ## Required environment variables
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Postgres connection string. Set by `docker-compose.yml` from `POSTGRES_PASSWORD`. |
-| `DARKBLOOM_SSH_TARGET` | SSH host or alias for the managed darkbloom host. Never a literal value committed to this repo - put it in `.env` (gitignored) and prefer an alias resolved via the mounted `secrets/ssh/config`. |
-| `POSTGRES_PASSWORD` | Postgres password, generated locally, never committed. |
+| `DATABASE_URL` | Postgres connection string. `docker-compose.yml` builds it from `POSTGRES_PASSWORD`; the Swarm stack gives it without a password and sets `DATABASE_PASSWORD_FILE`. |
+| `DARKBLOOM_HOST_1_SSH_TARGET` | SSH alias for the first managed Mac, resolved through the SSH config. Never a literal address in this repo. |
+| `POSTGRES_PASSWORD` | Local docker compose only: Postgres password, generated locally, never committed. |
 
 ## Optional environment variables and their defaults
 
+Per host. `<N>` is 1, 2, ... and discovery stops at the first missing
+`DARKBLOOM_HOST_<N>_SSH_TARGET`:
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `DARKBLOOM_HOST_LABEL` | `host-1` | Display name on the dashboard and the `host` column in every table. |
-| `DARKBLOOM_HOST_SPEC` | `unknown` | Display hardware spec, e.g. `Apple M3 Max`. |
-| `DARKBLOOM_SSH_KEY_PATH` | unset | Explicit identity file path, if not already selected via `secrets/ssh/config`. |
-| `DARKBLOOM_REMOTE_PYTHON` | `python3` | Interpreter used for the remote earnings-ledger read. |
-| `DARKBLOOM_MODELS` | `qwen3.5-35b-a3b,gemma-4-26b-qat-4bit,gpt-oss-20b` | Fixed candidate model list to score and switch between (see "Deferred" below). |
+| `DARKBLOOM_HOST_<N>_LABEL` | the SSH target | Display name on the dashboard and the `host` column in every table. |
+| `DARKBLOOM_HOST_<N>_SPEC` | `unknown` | Display hardware spec, e.g. `Apple M3 Max`. |
+| `DARKBLOOM_HOST_<N>_MODELS` | `qwen3.5-35b-a3b,gemma-4-26b-qat-4bit,gpt-oss-20b` | Comma-separated models this Mac has downloaded and may be scored for (see "Deferred" below). |
+| `DARKBLOOM_HOST_<N>_SSH_KEY_PATH` | unset | Explicit identity file, if the SSH config does not select one. |
+| `DARKBLOOM_HOST_<N>_REMOTE_PYTHON` | `python3` | Interpreter used for the remote earnings-ledger read. |
+| `DARKBLOOM_HOST_<N>_LIVE_EXECUTION` | `FLEET_LIVE_EXECUTION` | Per-host override of the live switch. |
+
+Shared by every host:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATABASE_PASSWORD_FILE` | unset | File holding the Postgres password (a Swarm secret), merged into `DATABASE_URL`. |
+| `DARKBLOOM_SSH_CONFIG` | unset | SSH config passed to every `ssh` call with `-F` (a Swarm secret on the cluster). |
 | `DARKBLOOM_BASE_URL` | `https://api.darkbloom.dev` | Public demand-capacity API base. |
 | `DARKBLOOM_PRICING_URL` | `https://api.darkbloom.dev/v1/pricing` | Public output-token pricing endpoint. |
 | `POLL_INTERVAL_SECONDS` | `60` | Ingestion + decision cadence. |

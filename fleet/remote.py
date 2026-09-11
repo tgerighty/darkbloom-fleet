@@ -37,6 +37,8 @@ print(json.dumps(rows))
 
 def _run_ssh(cfg: Config, remote_command: str, timeout: float) -> str:
     command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+    if cfg.ssh_config_path:
+        command += ["-F", cfg.ssh_config_path]
     if cfg.ssh_key_path:
         command += ["-i", cfg.ssh_key_path]
     command += [cfg.ssh_target, remote_command]
