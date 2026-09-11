@@ -50,8 +50,8 @@ def fetch_output_prices(pricing_url: str) -> tuple[dict[str, float], float]:
     if not isinstance(payload, dict):
         raise TypeError("pricing payload is not a JSON object")
     fallback = max(0, int(payload.get("fallback_output_price") or 0)) / 1_000_000
-    parsed = (_price_per_token(row) for row in payload.get("prices") or [])
-    return dict(p for p in parsed if p), fallback
+    rows = payload.get("prices") or []
+    return {p[0]: p[1] for row in rows if (p := _price_per_token(row))}, fallback
 
 
 def resolve_prices(models: tuple[str, ...], prices: dict[str, float], fallback: float) -> dict[str, float]:
