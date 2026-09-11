@@ -35,4 +35,4 @@ class Payout:
 class Decision:
     target: str | None
     reason: str
-    action: str  # KEEP | SWITCH | WOULD_SWITCH | WAIT | BLOCKED
+    action: str  # KEEP | SWITCH | SWITCH_WHEN_IDLE | WOULD_SWITCH | WAIT | BLOCKED

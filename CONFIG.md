@@ -98,6 +98,22 @@ earnings-ledger data (2026-09-09 05:54 -> 2026-09-11 12:22 local):
   same failure, while a 20-30 second wait lets the old process finish dying
   first.
 
+## Fast idle-gap watcher (no new env var)
+
+Idle-gating (above) can itself starve a switch that never sees an idle
+instant at tick time even though idle gaps are opening and closing between
+ticks - the real host missed 8 consecutive ~60s ticks in a row on 2026-09-11
+this way. When a tick's decision is `SWITCH_WHEN_IDLE` (clears margin and
+dwell, blocked only on `inference_active`) and `FLEET_LIVE_EXECUTION=true`,
+the collector launches a 1s-poll watcher on the remote host for the rest of
+the cycle instead of waiting for the next tick - see README's "Fast idle-gap
+watcher" for how it works and `fleet/remote_assets/fast_switch_watcher.py`
+for the implementation. Its poll window is derived from the existing
+`POLL_INTERVAL_SECONDS` (`poll_interval_seconds - 5`, floored at 5s), not a
+separate setting - one less knob, and it stays correct if the cadence
+changes. In OBSERVE mode this is also a no-op: the collector only logs what
+it would launch.
+
 ## What's deferred, and why it's safe to defer for v1
 
 - **Local model-availability discovery** (`darkbloom models list --all` over

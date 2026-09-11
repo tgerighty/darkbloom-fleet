@@ -1,7 +1,8 @@
-"""SSH-based ingestion from the managed host. Read-only except execute_switch,
-which is gated by Config.live_execution and is never called from the default
-observe-mode collector path. No hostnames or credentials live here — the SSH
-target and key path come from Config, which reads them from the environment.
+"""SSH-based ingestion from the managed host. Read-only except execute_switch
+and launch_fast_switch_watcher, both gated by Config.live_execution and never
+called from the default observe-mode collector path. No hostnames or
+credentials live here — the SSH target and key path come from Config, which
+reads them from the environment.
 """
 from __future__ import annotations
 
@@ -9,12 +10,18 @@ import json
 import shlex
 import subprocess
 import time
+from pathlib import Path
 
 from .config import Config
 from .types import DaemonState, Payout
 
 DAEMON_STATE_PATH = "~/.darkbloom/daemon-state.json"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
+
+FAST_SWITCH_WATCHER_ASSET = Path(__file__).parent / "remote_assets" / "fast_switch_watcher.py"
+FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
+FAST_SWITCH_SCRIPT_PATH = f"{FAST_SWITCH_REMOTE_DIR}/fast_switch_watcher.py"
+FAST_SWITCH_STATE_PATH = f"{FAST_SWITCH_REMOTE_DIR}/fleet-target.json"
 
 _PAYOUTS_SNIPPET = """
 import json, sqlite3
@@ -74,3 +81,29 @@ def execute_switch(cfg: Config, target_model: str) -> None:
         raise RuntimeError("refusing to execute a switch: FLEET_LIVE_EXECUTION is not enabled")
     command = f"darkbloom start --model {shlex.quote(target_model)} --idle-timeout 0"
     _run_ssh(cfg, command, timeout=300)
+
+
+def launch_fast_switch_watcher(cfg: Config, target: str, max_seconds: float) -> None:
+    """Live mode only. Deploys fast_switch_watcher.py to the remote host and
+    launches it in the background (idempotent - safe to call every tick: the
+    watcher self-locks via a PID file, so a call while one is already running
+    just re-deploys the script/state and exits without a second poller). The
+    watcher re-reads its target from the state file written here each time
+    rather than a fixed argument, so it self-corrects if the recommendation
+    changes mid-wait. See collector.py and README for why this exists."""
+    if not cfg.live_execution:
+        raise RuntimeError("refusing to launch the fast-poll watcher: FLEET_LIVE_EXECUTION is not enabled")
+    script = FAST_SWITCH_WATCHER_ASSET.read_text()
+    state = json.dumps({
+        "target": target,
+        "valid_targets": list(cfg.models),
+        "max_seconds": max_seconds,
+        "written_at": time.time(),
+    })
+    remote_command = (
+        f"mkdir -p {FAST_SWITCH_REMOTE_DIR} && "
+        f"cat > {FAST_SWITCH_SCRIPT_PATH} <<'PY'\n{script}\nPY\n"
+        f"cat > {FAST_SWITCH_STATE_PATH} <<'JSON'\n{state}\nJSON\n"
+        f"nohup {shlex.quote(cfg.remote_python)} {FAST_SWITCH_SCRIPT_PATH} </dev/null >/dev/null 2>&1 &"
+    )
+    _run_ssh(cfg, remote_command, timeout=20)

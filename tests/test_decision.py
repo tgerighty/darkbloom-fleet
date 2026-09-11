@@ -42,7 +42,7 @@ def test_decide_blocks_on_minimum_dwell_even_with_a_clear_margin():
     assert result.target == "a" and "dwell" in result.reason
 
 
-def test_decide_blocks_while_the_provider_is_serving_a_request():
+def test_decide_marks_switch_when_idle_while_the_provider_is_serving_a_request():
     result = decide({"a": 1.0, "b": 2.0}, current_model="a", last_switch_at=0, now=10_000,
                      inference_active=True, **MARGINS)
-    assert result.target == "a" and "idle" in result.reason
+    assert result.target == "b" and result.action == "SWITCH_WHEN_IDLE" and "idle" in result.reason

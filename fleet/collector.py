@@ -81,6 +81,25 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision, daemon: DaemonSt
     return True, None
 
 
+def _maybe_launch_fast_poll(cfg: Config, decision, now: float) -> None:
+    """A SWITCH_WHEN_IDLE decision means the challenger already clears every
+    gate except idle. Waiting out the rest of this ~60s poll cycle risks
+    missing a narrow idle gap that opens and closes between ticks - exactly
+    what missed 8 consecutive ticks in a row on the real host (see README) -
+    so launch the self-locking 1s-poll watcher on the remote host instead;
+    it re-checks the live recommendation every second and switches the
+    instant a gap opens."""
+    if decision.action != "SWITCH_WHEN_IDLE":
+        return
+    if not cfg.live_execution:
+        log.info("observe mode: would launch fast-poll watcher for target %s", decision.target)
+        return
+    try:
+        remote.launch_fast_switch_watcher(cfg, decision.target, max_seconds=max(5.0, cfg.poll_interval_seconds - 5))
+    except Exception as error:  # noqa: BLE001 - one bad tick must not kill the loop
+        log.warning("failed to launch fast-poll watcher: %s", error)
+
+
 def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     now = time.time()
     host = cfg.host_label
@@ -103,6 +122,7 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
 
     result = _decide(cfg, pool, ema, daemon, now)
     executed, error = _maybe_execute(cfg, pool, result, daemon, now)
+    _maybe_launch_fast_poll(cfg, result, now)
     mode = "live" if cfg.live_execution else "observe"
     db.insert_decision(pool, host, now, daemon.current_model if daemon else None, result, mode, executed, error)
     log.info("[%s] %s -> %s (%s): %s", mode, daemon.current_model if daemon else "?", result.target, result.action, result.reason)

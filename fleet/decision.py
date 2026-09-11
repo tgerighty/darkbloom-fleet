@@ -1,5 +1,10 @@
 """Switch decision: EMA-smoothed scores + the source project's margins/dwell.
 
+A SWITCH_WHEN_IDLE result means the challenger already clears every gate
+except idle - collector.py launches a fast 1s-poll watcher on the remote
+host for exactly this case instead of waiting out the rest of the ~60s poll
+cycle (see README for the incident that motivated it).
+
 Forked from darkbloom-manager's warm_model_manager.py (score formula, switch-
 cost discount, relative/absolute margins) with the "N consecutive passing
 checks" switch gate replaced by a 20-minute EMA of each candidate's score —
@@ -66,7 +71,11 @@ def decide(
         remaining = min_dwell_seconds - (now - last_switch_at)
         return Decision(current_model, f"{challenger} clears margin but minimum dwell has {remaining:.0f}s left", "KEEP")
     if inference_active:
-        return Decision(current_model, f"{challenger} clears margin but provider is serving a request; waiting for idle", "KEEP")
+        return Decision(
+            challenger,
+            f"{challenger} clears margin but provider is serving a request; waiting for idle",
+            "SWITCH_WHEN_IDLE",
+        )
     return Decision(
         challenger,
         f"{challenger} clears margin on smoothed score ({challenger_score:.3f} vs {current_score:.3f})",
