@@ -1,6 +1,7 @@
 # Secrets - never commit these. This repo is public.
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 id_rsa*

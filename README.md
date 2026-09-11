@@ -4,8 +4,24 @@ A standalone service for managing and optimizing revenue across a small
 fleet of Macs serving inference on the [darkbloom](https://darkbloom.dev)
 network. Starts with one host, designed to grow to a handful.
 
-**Status: design in progress, no application code yet.** See below for
-what's decided so far and what's still open.
+**Status: v1 implemented — single host, observe/dry-run by default.** See
+below for what's decided, what's running, and what's still deferred.
+
+## Credit
+
+The model-switching heuristic in `fleet/scoring.py` and `fleet/decision.py`
+originated in a private project (`darkbloom-manager`, not public — referenced
+here only by name, no internal paths or hostnames) and was forked and
+extended for this standalone service. Two pieces come from there directly:
+
+- The score formula, switch-cost discount, and relative/absolute margins are
+  ported from that project's `warm_model_manager.py`.
+- Replacing the "N consecutive passing checks" switch gate with a 20-minute
+  EMA of each candidate model's score is ported from that project's
+  `analysis/dry_run_switcher.py`, which validated it against 54.5 hours of
+  real earnings-ledger data: same revenue as the consecutive-checks gate,
+  with 3-5x fewer switches (48 -> 3-16). See `CONFIG.md` for the full numbers
+  and the guardrail defaults that carry them forward here.
 
 ## Why
 
@@ -30,26 +46,51 @@ happened and why.
 - **Its own dashboard.** A real web UI the service serves itself, not a
   page that needs anyone to keep it updated by hand.
 - **Executes switches autonomously**, gated by configurable guardrails
-  (idle-before-switch, minimum consecutive confirmations before acting,
-  etc.) - not just advisory. The specific default values for those
-  guardrails are still open.
+  (idle-before-switch, EMA-smoothed confirmation, restart-retry backoff)
+  - not just advisory, though v1 ships with those guardrails defaulted to
+    OBSERVE mode (see "Safety default" in CONFIG.md).
 - **v1 scope: single host.** Multi-host support and any LLM-driven
   decision-making (as opposed to today's scored heuristic) are explicit
   follow-on work, not built into v1.
 
-## Still open
+## Resolved for v1 (see CONFIG.md for details)
 
-- Exact ingestion cadence and mechanism (polling interval, how failures
-  are handled without ever leaving a host in an ambiguous state)
-- Guardrail defaults (idle-gating, consecutive-check thresholds,
-  restart-retry backoff) - today's manual practice is the starting
-  point, needs porting into config
-- Deployment target (this cluster's Docker Swarm vs. something simpler
-  for v1)
-- Credential handling for SSH access to managed hosts (this repo is
-  public - no key material, tokens, or host-identifying secrets ever
-  get committed here; real config lives outside the repo, see
-  `.gitignore`)
+- **Ingestion**: a plain asyncio loop polls every 60s by default
+  (`POLL_INTERVAL_SECONDS`) - daemon state and the public demand/pricing
+  feeds every tick, the real earnings ledger every tick since the last seen
+  payout row. Each source fails independently and is logged; a bad tick
+  never crashes the service or blocks the others.
+- **Guardrails**: EMA-smoothed switching (see "Credit" above), a 30-minute
+  minimum dwell, idle-gating before any real restart, and a 30-second
+  restart-retry backoff after a failed switch attempt. Defaults and
+  rationale are in `CONFIG.md`.
+- **Deployment**: v1 ships as `docker-compose.yml` (one app container + one
+  Postgres container) - not a Swarm stack yet. See "Running locally" below.
+- **Credentials**: SSH target, key, and host identity all come from
+  environment variables or a mounted `./secrets/ssh` directory - never
+  committed. See `.gitignore` and `CONFIG.md`.
+
+## Deferred to a follow-up (explicitly out of v1 scope)
+
+- Multi-host support (schema and code are single-host; `host` is a config
+  label, not a table to join against yet).
+- LLM-driven decision-making (today's heuristic is the scored formula above).
+- Discovering which models are actually downloaded/loadable on the host via
+  `darkbloom models list` over SSH - v1 scores a fixed configured model list
+  (`DARKBLOOM_MODELS`) instead.
+- A Docker Swarm stack manifest for this cluster.
+
+## Running locally
+
+```bash
+cp .env.example .env            # fill in DARKBLOOM_SSH_TARGET, POSTGRES_PASSWORD
+mkdir -p secrets/ssh             # SSH config + key + known_hosts for the host
+docker compose up --build
+# dashboard: http://localhost:8080
+```
+
+Full environment variable reference, guardrail defaults, and the backtest
+numbers behind them: see `CONFIG.md`.
 
 ## Security
 

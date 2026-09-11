@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: darkbloom_fleet
+      POSTGRES_USER: darkbloom_fleet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - fleet_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U darkbloom_fleet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  fleet:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${FLEET_DASHBOARD_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgresql://darkbloom_fleet:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/darkbloom_fleet
+      DARKBLOOM_SSH_TARGET: ${DARKBLOOM_SSH_TARGET:?set DARKBLOOM_SSH_TARGET in .env}
+      DARKBLOOM_HOST_LABEL: ${DARKBLOOM_HOST_LABEL:-host-1}
+      DARKBLOOM_HOST_SPEC: ${DARKBLOOM_HOST_SPEC:-unknown}
+      DARKBLOOM_REMOTE_PYTHON: ${DARKBLOOM_REMOTE_PYTHON:-python3}
+      DARKBLOOM_MODELS: ${DARKBLOOM_MODELS:-}
+      DARKBLOOM_BASE_URL: ${DARKBLOOM_BASE_URL:-https://api.darkbloom.dev}
+      DARKBLOOM_PRICING_URL: ${DARKBLOOM_PRICING_URL:-https://api.darkbloom.dev/v1/pricing}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
+      FLEET_LIVE_EXECUTION: ${FLEET_LIVE_EXECUTION:-false}
+      FLEET_DASHBOARD_PORT: "8080"
+    volumes:
+      # SSH config + key + known_hosts for the managed host, mounted read-only.
+      # Never bake these into the image or commit them — see .gitignore.
+      - ${DARKBLOOM_SSH_DIR:-./secrets/ssh}:/home/appuser/.ssh:ro
+
+volumes:
+  fleet_pgdata:
