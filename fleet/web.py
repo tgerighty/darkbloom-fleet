@@ -1,5 +1,7 @@
 """Dashboard: one static HTML/JS page plus the JSON API it polls. No
 templating engine — the page is static and fetches /api/status itself.
+One scheduler task runs per configured host, all against the same pool —
+see config.load_configs for why the rest of the app stays single-host-shaped.
 """
 from __future__ import annotations
 
@@ -18,12 +20,13 @@ from .scheduler import run_forever
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(cfg: Config, pool: ConnectionPool) -> FastAPI:
+def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        task = asyncio.create_task(run_forever(cfg, pool))
+        tasks = [asyncio.create_task(run_forever(cfg, pool)) for cfg in configs]
         yield
-        task.cancel()
+        for task in tasks:
+            task.cancel()
 
     app = FastAPI(title="darkbloom-fleet", lifespan=lifespan)
 
@@ -33,6 +36,7 @@ def create_app(cfg: Config, pool: ConnectionPool) -> FastAPI:
 
     @app.get("/api/status")
     async def status() -> dict:
-        return await asyncio.to_thread(queries.build_status, cfg, pool)
+        statuses = await asyncio.gather(*(asyncio.to_thread(queries.build_status, cfg, pool) for cfg in configs))
+        return {"hosts": list(statuses)}
 
     return app

@@ -13,6 +13,8 @@
   .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; }
   .badge.observe { background: #2b6cb033; color: #2b6cb0; }
   .badge.live { background: #c0392b33; color: #c0392b; }
+  .host-block { margin-bottom: 3rem; padding-bottom: 1.5rem; border-bottom: 1px solid light-dark(#0002, #fff2); }
+  .host-block:last-child { border-bottom: none; }
   section { margin-bottom: 2rem; }
   h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.65; margin-bottom: 0.6rem; }
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
@@ -30,35 +32,9 @@
 </style>
 </head>
 <body>
-  <h1 id="title">darkbloom-fleet</h1>
-  <div class="sub" id="subtitle">loading…</div>
-
-  <div class="kpis">
-    <div class="kpi"><div class="value" id="kpi-current">–</div><div class="label">current model</div></div>
-    <div class="kpi"><div class="value" id="kpi-earned-24h">–</div><div class="label">$ earned / 24h</div></div>
-    <div class="kpi"><div class="value" id="kpi-earned-1h">–</div><div class="label">$ earned / 1h</div></div>
-  </div>
-
-  <section>
-    <h2>Live demand</h2>
-    <table id="demand-table">
-      <thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
-
-  <section>
-    <h2>Serving percentage (24h)</h2>
-    <div id="serving-bars"></div>
-  </section>
-
-  <section>
-    <h2>Recent decisions</h2>
-    <table id="decisions-table">
-      <thead><tr><th>when</th><th>current</th><th>target</th><th>action</th><th>reason</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
+  <h1>darkbloom-fleet</h1>
+  <div class="sub" id="fleet-subtitle">loading…</div>
+  <div id="hosts"></div>
 
 <script>
 function fmtAge(epoch) {
@@ -69,44 +45,56 @@ function fmtAge(epoch) {
   return Math.round(s / 3600) + "h ago";
 }
 function num(v, digits) { return v === null || v === undefined ? "–" : Number(v).toFixed(digits); }
+function esc(v) { return v === null || v === undefined ? "" : String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+function renderHost(s) {
+  const badge = '<span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span>';
+  const subtitle = badge + " · daemon " + fmtAge(s.as_of) +
+    (s.daemon_fresh ? "" : " (stale)") + (s.inference_active ? " · serving a request" : " · idle");
+
+  const demandRows = s.demand.map(function (r) {
+    return "<tr><td>" + esc(r.model) + "</td><td>" + r.active_requests + "</td><td>" + r.warm_providers +
+      "</td><td>" + num(r.pressure, 2) + "</td><td>" + num(r.output_usd_per_million, 2) +
+      "</td><td>" + num(r.score, 3) + "</td><td><b>" + num(r.ema_score, 3) + "</b></td></tr>";
+  }).join("");
+
+  const servingEntries = Object.entries(s.serving_percentage_24h);
+  const servingBars = servingEntries.length ? servingEntries.map(function ([model, pct]) {
+    return '<div class="bar-row"><div class="bar-label">' + esc(model) + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      '<div>' + pct + '%</div></div>';
+  }).join("") : "<i>not enough history yet</i>";
+
+  const decisionRows = s.recent_decisions.map(function (d) {
+    return "<tr><td>" + fmtAge(d.observed_at) + "</td><td>" + esc(d.current_model || "–") + "</td><td>" +
+      esc(d.target_model || "–") + "</td><td>" + esc(d.action) + (d.executed ? " ✓" : "") +
+      "</td><td>" + esc(d.reason) + "</td></tr>";
+  }).join("");
+
+  return '<div class="host-block">' +
+    '<h1>' + esc(s.host.label) + ' (' + esc(s.host.spec) + ')</h1>' +
+    '<div class="sub">' + subtitle + '</div>' +
+    '<div class="kpis">' +
+      '<div class="kpi"><div class="value">' + esc(s.current_model || "none") + '</div><div class="label">current model</div></div>' +
+      '<div class="kpi"><div class="value">$' + num(s.earnings_usd_24h, 2) + '</div><div class="label">$ earned / 24h</div></div>' +
+      '<div class="kpi"><div class="value">$' + num(s.earnings_usd_1h, 4) + '</div><div class="label">$ earned / 1h</div></div>' +
+    '</div>' +
+    '<section><h2>Live demand</h2><table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead><tbody>' + demandRows + '</tbody></table></section>' +
+    '<section><h2>Serving percentage (24h)</h2><div>' + servingBars + '</div></section>' +
+    '<section><h2>Recent decisions</h2><table><thead><tr><th>when</th><th>current</th><th>target</th><th>action</th><th>reason</th></tr></thead><tbody>' + decisionRows + '</tbody></table></section>' +
+  '</div>';
+}
 
 async function refresh() {
   let s;
   try {
     s = await (await fetch("/api/status")).json();
   } catch (e) {
-    document.getElementById("subtitle").innerHTML = '<span class="err">status unavailable: ' + e + '</span>';
+    document.getElementById("fleet-subtitle").innerHTML = '<span class="err">status unavailable: ' + e + '</span>';
     return;
   }
-  document.getElementById("title").textContent = s.host.label + " (" + s.host.spec + ")";
-  const badge = '<span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span>';
-  document.getElementById("subtitle").innerHTML = badge + " · daemon " + fmtAge(s.as_of) +
-    (s.daemon_fresh ? "" : " (stale)") + (s.inference_active ? " · serving a request" : " · idle");
-  document.getElementById("kpi-current").textContent = s.current_model || "none";
-  document.getElementById("kpi-earned-24h").textContent = "$" + num(s.earnings_usd_24h, 2);
-  document.getElementById("kpi-earned-1h").textContent = "$" + num(s.earnings_usd_1h, 4);
-
-  const demandBody = document.querySelector("#demand-table tbody");
-  demandBody.innerHTML = s.demand.map(function (r) {
-    return "<tr><td>" + r.model + "</td><td>" + r.active_requests + "</td><td>" + r.warm_providers +
-      "</td><td>" + num(r.pressure, 2) + "</td><td>" + num(r.output_usd_per_million, 2) +
-      "</td><td>" + num(r.score, 3) + "</td><td><b>" + num(r.ema_score, 3) + "</b></td></tr>";
-  }).join("");
-
-  const bars = document.getElementById("serving-bars");
-  const entries = Object.entries(s.serving_percentage_24h);
-  bars.innerHTML = entries.length ? entries.map(function ([model, pct]) {
-    return '<div class="bar-row"><div class="bar-label">' + model + '</div>' +
-      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
-      '<div>' + pct + '%</div></div>';
-  }).join("") : "<i>not enough history yet</i>";
-
-  const decisionsBody = document.querySelector("#decisions-table tbody");
-  decisionsBody.innerHTML = s.recent_decisions.map(function (d) {
-    return "<tr><td>" + fmtAge(d.observed_at) + "</td><td>" + (d.current_model || "–") + "</td><td>" +
-      (d.target_model || "–") + "</td><td>" + d.action + (d.executed ? " ✓" : "") +
-      "</td><td>" + d.reason + "</td></tr>";
-  }).join("");
+  document.getElementById("fleet-subtitle").textContent = s.hosts.length + " host" + (s.hosts.length === 1 ? "" : "s");
+  document.getElementById("hosts").innerHTML = s.hosts.map(renderHost).join("");
 }
 refresh();
 setInterval(refresh, 15000);

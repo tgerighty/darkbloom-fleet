@@ -9,20 +9,22 @@ import logging
 import uvicorn
 
 from . import db
-from .config import load_config
+from .config import load_configs
 from .web import create_app
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    cfg = load_config()
-    pool = db.get_pool(cfg.database_url)
+    configs = load_configs()
+    pool = db.get_pool(configs[0].database_url)
     db.init_schema(pool)
-    mode = "LIVE — switches will be executed" if cfg.live_execution else "OBSERVE — dry-run only, no switches will be executed"
-    logging.getLogger("fleet.main").info("starting in %s mode for host %r", mode, cfg.host_label)
-    app = create_app(cfg, pool)
+    log = logging.getLogger("fleet.main")
+    for cfg in configs:
+        mode = "LIVE — switches will be executed" if cfg.live_execution else "OBSERVE — dry-run only, no switches will be executed"
+        log.info("starting in %s mode for host %r", mode, cfg.host_label)
+    app = create_app(configs, pool)
     try:
-        uvicorn.run(app, host="0.0.0.0", port=cfg.dashboard_port)
+        uvicorn.run(app, host="0.0.0.0", port=configs[0].dashboard_port)
     finally:
         pool.close()
 
