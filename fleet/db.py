@@ -173,11 +173,20 @@ def last_failed_switch_at(pool: ConnectionPool, host: str) -> float:
 
 
 def insert_decision(pool: ConnectionPool, host: str, observed_at: float, current_model: str | None,
-                     decision: Decision, outcome: Outcome) -> None:
+                     decision: Decision, outcome: Outcome) -> int:
     with pool.connection() as conn:
-        conn.execute(
+        row = conn.execute(
             "INSERT INTO decisions (host, observed_at, current_model, target_model, action, reason, "
-            "mode, executed, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "mode, executed, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (host, observed_at, current_model, decision.target, decision.action, decision.reason,
              outcome.mode, outcome.executed, outcome.error),
+        ).fetchone()
+    return int(row["id"])
+
+
+def record_outcome(pool: ConnectionPool, decision_id: int, outcome: Outcome) -> None:
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE decisions SET mode = %s, executed = %s, error = %s WHERE id = %s",
+            (outcome.mode, outcome.executed, outcome.error, decision_id),
         )

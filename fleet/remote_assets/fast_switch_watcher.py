@@ -97,11 +97,38 @@ def read_daemon_state() -> dict[str, object]:
     return json.loads(DAEMON_STATE_PATH.read_text())
 
 
+def _daemon_state_or_none() -> dict[str, object] | None:
+    """The daemon rewrites its state file in place; a missing or half-written
+    file is a transient read, not a reason to stop watching."""
+    try:
+        return read_daemon_state()
+    except (OSError, ValueError):
+        return None
+
+
+def _should_switch(target: str | None, state: dict[str, object] | None) -> bool:
+    return (target is not None and state is not None
+            and target != state.get("current_model") and not state.get("inference_active", True))
+
+
 def _run_start(target: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(DARKBLOOM_BIN), "start", "--model", target, "--idle-timeout", "0"],
         capture_output=True, text=True, timeout=60, check=False,
     )
+
+
+def _verify(target: str) -> bool:
+    current = None
+    for _ in range(5):
+        time.sleep(3)
+        state = _daemon_state_or_none()
+        current = state.get("current_model") if state else current
+        if current == target:
+            log(f"post-switch verification: current_model={target} ok=True")
+            return True
+    log(f"post-switch verification: current_model={current} ok=False (gave up after 15s)")
+    return False
 
 
 def execute_switch(target: str) -> bool:
@@ -115,15 +142,21 @@ def execute_switch(target: str) -> bool:
         log(f"switch to {target} FAILED: {result.stderr.strip()}")
         return False
     log(f"switch command for {target} returned success, verifying...")
-    state: dict[str, object] = {}
-    for _ in range(5):
-        time.sleep(3)
-        state = read_daemon_state()
-        if state.get("current_model") == target:
-            log(f"post-switch verification: current_model={target} ok=True")
-            return True
-    log(f"post-switch verification: current_model={state.get('current_model')} ok=False (gave up after 15s)")
-    return False
+    return _verify(target)
+
+
+def _wait_for_idle_gap(deadline: float) -> str | None:
+    """The target to switch to once the host is idle, or None at the deadline.
+    Target and idleness are both re-read immediately before returning, so a
+    withdrawn recommendation or a request that has just started always wins."""
+    while time.time() < deadline:
+        target = read_target_state()[0]
+        if not _should_switch(target, _daemon_state_or_none()):
+            time.sleep(POLL_SECONDS)
+            continue
+        if read_target_state()[0] == target and _should_switch(target, _daemon_state_or_none()):
+            return target
+    return None
 
 
 def main() -> None:
@@ -132,20 +165,11 @@ def main() -> None:
         if in_failure_backoff(time.time()):
             log("a recent switch failed; waiting out the restart backoff")
             return
-        _, _, max_seconds = read_target_state()
-        deadline = time.time() + max_seconds
-        while time.time() < deadline:
-            target, _valid, _ = read_target_state()
-            state = read_daemon_state()
-            if target is None or target == state.get("current_model") or state.get("inference_active", True):
-                time.sleep(POLL_SECONDS)
-                continue
-            if read_target_state()[0] != target:
-                continue  # the recommendation changed while we were checking
-            if not execute_switch(target):
-                FAILED_AT_FILE.write_text(str(time.time()))
-            return
-        log("timed out this cycle without an idle gap opening")
+        target = _wait_for_idle_gap(time.time() + read_target_state()[2])
+        if target is None:
+            log("timed out this cycle without an idle gap opening")
+        elif not execute_switch(target):
+            FAILED_AT_FILE.write_text(str(time.time()))
     finally:
         os.close(lock_fd)
 

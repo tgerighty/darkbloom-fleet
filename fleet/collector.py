@@ -124,9 +124,16 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     _ingest_earnings(cfg, pool, now)
 
     result = _decide(cfg, pool, ema, daemon, now)
-    executed, error = _maybe_execute(cfg, pool, result, now)
-    _maybe_launch_fast_poll(cfg, result)
+    _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
+
+
+def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current_model: str | None, now: float) -> None:
+    """The decision is stored before any switch is dispatched, so a crash
+    mid-switch still leaves a record; the outcome is written back afterwards."""
     mode = "live" if cfg.live_execution else "observe"
-    current_model = daemon.current_model if daemon else None
-    db.insert_decision(pool, host, now, current_model, result, Outcome(mode, executed, error))
+    decision_id = db.insert_decision(pool, cfg.host_label, now, current_model, result, Outcome(mode, False, None))
+    executed, error = _maybe_execute(cfg, pool, result, now)
+    if executed or error:
+        db.record_outcome(pool, decision_id, Outcome(mode, executed, error))
+    _maybe_launch_fast_poll(cfg, result)
     log.info("[%s] %s -> %s (%s): %s", mode, current_model or "?", result.target, result.action, result.reason)

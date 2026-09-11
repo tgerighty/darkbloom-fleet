@@ -56,9 +56,9 @@ happened and why.
   When a tick finds a switch that clears every gate except idle, it launches
   a self-locking 1s-poll watcher on the remote host (see "Fast idle-gap
   watcher" below) instead of waiting for the next full cycle.
-- **v1 scope: single host.** Multi-host support and any LLM-driven
-  decision-making (as opposed to today's scored heuristic) are explicit
-  follow-on work, not built into v1.
+- **Several Macs, one service.** Each `DARKBLOOM_HOST_<N>_*` block is a
+  managed Mac with its own model list. LLM-driven decision-making (as opposed
+  to today's scored heuristic) remains follow-on work.
 
 ## Resolved for v1 (see CONFIG.md for details)
 

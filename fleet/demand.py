@@ -22,7 +22,9 @@ def _get_json(url: str) -> Json:
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models/capacity")
-    rows = payload if isinstance(payload, list) else payload.get("data", payload.get("models", []))
+    if isinstance(payload, dict):
+        payload = payload.get("data", payload.get("models", []))
+    rows = payload if isinstance(payload, list) else []
     samples: dict[str, CapacitySample] = {}
     for row in rows:
         sample = pressure_from_capacity(row)
@@ -31,19 +33,25 @@ def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
     return samples
 
 
+def _price_per_token(row: object) -> tuple[str, float] | None:
+    """(model, USD per output token) from one pricing row; None if malformed."""
+    if not isinstance(row, dict) or not row.get("model"):
+        return None
+    try:
+        return str(row["model"]), max(0, int(row.get("output_price") or 0)) / 1_000_000
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_output_prices(pricing_url: str) -> tuple[dict[str, float], float]:
     """Output USD per token, per model, plus the fallback price for models
     with no explicit row. Mirrors warm_model_manager.fetch_output_prices()."""
     payload = _get_json(pricing_url)
+    if not isinstance(payload, dict):
+        raise TypeError("pricing payload is not a JSON object")
     fallback = max(0, int(payload.get("fallback_output_price") or 0)) / 1_000_000
-    prices: dict[str, float] = {}
-    for row in payload.get("prices") or []:
-        if isinstance(row, dict) and row.get("model"):
-            try:
-                prices[str(row["model"])] = max(0, int(row.get("output_price") or 0)) / 1_000_000
-            except (TypeError, ValueError):
-                continue  # one malformed row must not drop every price
-    return prices, fallback
+    parsed = (_price_per_token(row) for row in payload.get("prices") or [])
+    return dict(p for p in parsed if p), fallback
 
 
 def resolve_prices(models: tuple[str, ...], prices: dict[str, float], fallback: float) -> dict[str, float]:

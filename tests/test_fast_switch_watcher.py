@@ -1,7 +1,7 @@
 """fast_switch_watcher.py is a standalone stdlib script deployed to the
 remote host, not part of the fleet package - loaded here by file path so its
-pure logic (the lock, target-state parsing, failure backoff) can be unit
-tested without SSH or a real darkbloom host."""
+pure logic (the lock, target-state parsing, failure backoff, the idle-gap
+wait) can be unit tested without SSH or a real darkbloom host."""
 import fcntl
 import importlib.util
 import os
@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 SCRIPT_PATH = Path(__file__).parent.parent / "fleet" / "remote_assets" / "fast_switch_watcher.py"
+IDLE_ON_A = {"current_model": "a", "inference_active": False}
+BUSY_ON_A = {"current_model": "a", "inference_active": True}
 
 
 def _load_module():
@@ -26,6 +28,8 @@ def watcher(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "LOCK_FILE", tmp_path / "lock")
     monkeypatch.setattr(module, "FAILED_AT_FILE", tmp_path / "failed-at")
     monkeypatch.setattr(module, "TARGET_STATE_PATH", tmp_path / "state.json")
+    monkeypatch.setattr(module, "LOG", tmp_path / "fast_switch.log")
+    monkeypatch.setattr(module, "POLL_SECONDS", 0.01)
     return module
 
 
@@ -91,3 +95,30 @@ def test_failure_backoff_holds_until_the_configured_backoff_passes(watcher):
 def test_failure_backoff_is_off_without_a_recorded_failure(watcher):
     watcher.TARGET_STATE_PATH.write_text('{"restart_backoff_seconds": 30}')
     assert watcher.in_failure_backoff(time.time()) is False
+
+
+def test_an_idle_gap_that_survives_the_recheck_returns_the_target(watcher, monkeypatch):
+    watcher.TARGET_STATE_PATH.write_text('{"target": "b", "valid_targets": ["a", "b"]}')
+    monkeypatch.setattr(watcher, "read_daemon_state", lambda: IDLE_ON_A)
+    assert watcher._wait_for_idle_gap(time.time() + 5) == "b"
+
+
+def test_a_request_starting_during_the_recheck_stops_the_switch(watcher, monkeypatch):
+    watcher.TARGET_STATE_PATH.write_text('{"target": "b", "valid_targets": ["a", "b"]}')
+    states = iter([IDLE_ON_A])
+    monkeypatch.setattr(watcher, "read_daemon_state", lambda: next(states, BUSY_ON_A))
+    assert watcher._wait_for_idle_gap(time.time() + 0.3) is None
+
+
+def test_verification_rides_out_a_half_written_state_file(watcher, monkeypatch):
+    reads = iter([ValueError("half-written"), {"current_model": "b"}])
+
+    def fake_read():
+        item = next(reads)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(watcher, "read_daemon_state", fake_read)
+    monkeypatch.setattr(watcher.time, "sleep", lambda _seconds: None)
+    assert watcher._verify("b") is True

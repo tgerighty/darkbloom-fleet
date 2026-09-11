@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from .config import Config
 
 DAY_SECONDS = 86_400
+OUTAGE_GAP_SECONDS = 600
 Row = dict[str, object]
 
 
@@ -51,25 +52,39 @@ def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[R
         ).fetchall()
 
 
+def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
+    """Percentage of covered window time per model. Each snapshot holds until
+    the next one (the last until now), counted only inside the window; a gap
+    longer than OUTAGE_GAP_SECONDS is an outage and counts for nobody."""
+    points = [*snapshots, {"observed_at": now, "current_model": None}]
+    totals: dict[str, float] = {}
+    for prev, nxt in pairwise(points):
+        model = prev["current_model"]
+        if model and 0 < nxt["observed_at"] - prev["observed_at"] < OUTAGE_GAP_SECONDS:
+            held = nxt["observed_at"] - max(prev["observed_at"], since)
+            if held > 0:
+                totals[model] = totals.get(model, 0.0) + held
+    covered = sum(totals.values())
+    return {model: round(100 * seconds / covered, 1) for model, seconds in totals.items()} if covered else {}
+
+
 def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float) -> dict[str, float]:
-    """Fraction of wall-clock time each model was the reported current_model
-    over the window, from consecutive daemon_snapshots gaps."""
-    since = time.time() - window_seconds
+    """Share of the window each model was the reported current_model, including
+    the model already serving when the window opened."""
+    now = time.time()
+    since = now - window_seconds
     with pool.connection() as conn:
+        before = conn.execute(
+            "SELECT observed_at, current_model FROM daemon_snapshots "
+            "WHERE host = %s AND observed_at <= %s ORDER BY observed_at DESC LIMIT 1",
+            (host, since),
+        ).fetchone()
         rows = conn.execute(
             "SELECT observed_at, current_model FROM daemon_snapshots "
             "WHERE host = %s AND observed_at > %s ORDER BY observed_at",
             (host, since),
         ).fetchall()
-    if len(rows) < 2:
-        return {}
-    totals: dict[str, float] = {}
-    for prev, nxt in pairwise(rows):
-        gap = nxt["observed_at"] - prev["observed_at"]
-        if prev["current_model"] and 0 < gap < 600:  # skip outage gaps > 10min
-            totals[prev["current_model"]] = totals.get(prev["current_model"], 0.0) + gap
-    covered = sum(totals.values())
-    return {model: round(100 * seconds / covered, 1) for model, seconds in totals.items()} if covered else {}
+    return _serving_shares(([before] if before else []) + rows, since, now)
 
 
 def build_status(cfg: Config, pool: ConnectionPool) -> Row:
