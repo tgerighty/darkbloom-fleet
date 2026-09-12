@@ -20,9 +20,13 @@
   extends itself every tick; observe mode should clear a stale remote watcher
   target; the "no eligible current model" branch in decision.py skips the
   idle and dwell gates.
-- [NEXT] [REFACTOR] CodeRabbit round 4 (deferred): key hosts by an immutable
+- ~~[NEXT] [REFACTOR] CodeRabbit round 4 (deferred): key hosts by an immutable
   id rather than the editable label; filter the restored EMA to cfg.models so
-  a removed model cannot linger; wrap the lifespan shutdown in try/finally.
+  a removed model cannot linger; wrap the lifespan shutdown in try/finally.~~
+  (2026-09-12: `host_id` from `DARKBLOOM_HOST_<N>_ID`, defaulting to the SSH
+  target, keys every table while `LABEL` stays display-only; stack.yml pins
+  both ids to the current labels so existing rows keep matching; the restored
+  EMA is filtered to `cfg.models` at load; lifespan shutdown runs in finally)
 - ~~[NEXT] [FEATURE] Measured switch penalty: feed the routability probe's
   first-request timings back into the switch-cost guardrail instead of the
   fixed 300 s.~~ (2026-09-12: median start-to-first-request delay over the

@@ -1,6 +1,7 @@
 """Postgres schema + connection pool. v1 is single-host, so every table
-carries a plain `host` label column rather than a hosts table — no join,
-no multi-host abstraction to build yet (see README "v1 scope").
+carries a plain `host` column (the immutable host id, not the display label)
+rather than a hosts table — no join, no multi-host abstraction to build yet
+(see README "v1 scope").
 """
 from __future__ import annotations
 

@@ -79,8 +79,9 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     votes = [{"provider_hash": "s1", "host": "m3", "votes": 2}, {"provider_hash": "s2", "host": "other", "votes": 9}]
     pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}], [{"action": "KEEP"}], votes))
     status = queries.build_status(
-        SimpleNamespace(host_label="m3", host_spec="M3 Max", live_execution=False, switch_cost_seconds=300.0), pool)
-    assert status["host"] == {"label": "m3", "spec": "M3 Max"} and status["mode"] == "OBSERVE"
+        SimpleNamespace(host_label="M3 label", host_id="m3", host_spec="M3 Max", live_execution=False,
+                        switch_cost_seconds=300.0), pool)
+    assert status["host"] == {"label": "M3 label", "spec": "M3 Max"} and status["mode"] == "OBSERVE"
     assert status["current_model"] == "a" and status["daemon_fresh"] is True
     assert status["earnings_usd_24h"] == 2.5 and status["earnings_usd_1h"] == 0.5
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
@@ -107,7 +108,7 @@ def test_earnings_queries_pass_the_attribution_filter_through(fake_pool):
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     pool = fake_pool(*_status_responses([], [], []))
-    status = queries.build_status(SimpleNamespace(host_label="m1", host_spec="?", live_execution=True,
+    status = queries.build_status(SimpleNamespace(host_label="m1", host_id="m1", host_spec="?", live_execution=True,
                                                   switch_cost_seconds=300.0), pool)
     assert status["current_model"] is None and status["mode"] == "LIVE"
     assert status["serving"]["1h"] == {"idle": 100.0} and status["demand"] == []

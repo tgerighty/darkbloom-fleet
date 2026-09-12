@@ -55,7 +55,8 @@ Per host. `<N>` is 1, 2, ... and discovery stops at the first missing
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DARKBLOOM_HOST_<N>_LABEL` | the SSH target | Display name on the dashboard and the `host` column in every table. |
+| `DARKBLOOM_HOST_<N>_ID` | the SSH target | Immutable database identity: the `host` column in every table. Changing it orphans that host's history, so set it once and never edit it — rename the host with `LABEL` instead. |
+| `DARKBLOOM_HOST_<N>_LABEL` | the SSH target | Display name on the dashboard only (logs and the `host` block of `/api/status`); never a database key. |
 | `DARKBLOOM_HOST_<N>_SPEC` | `unknown` | Display hardware spec, e.g. `Apple M3 Max`. |
 | `DARKBLOOM_HOST_<N>_MODELS` | `qwen3.5-35b-a3b,gemma-4-26b-qat-4bit,gpt-oss-20b` | Comma-separated models this Mac has downloaded and may be scored for (see "Deferred" below). |
 | `DARKBLOOM_HOST_<N>_SSH_KEY_PATH` | unset | Explicit identity file, if the SSH config does not select one. |

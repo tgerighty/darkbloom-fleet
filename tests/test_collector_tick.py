@@ -11,7 +11,7 @@ DAEMON = DaemonState("a", ("a",), False, 1, 100.0, True)
 
 
 def _cfg(**overrides) -> SimpleNamespace:
-    base = {"host_label": "h", "base_url": "https://x", "pricing_url": "https://x/p", "models": ("a", "b"),
+    base = {"host_id": "h", "base_url": "https://x", "pricing_url": "https://x/p", "models": ("a", "b"),
             "weights": {}, "ema_tau_minutes": 20.0, "poll_interval_seconds": 60.0, "relative_margin": 0.25,
             "absolute_margin": 0.01, "switch_cost_seconds": 300.0, "decision_horizon_seconds": 3600.0,
             "min_dwell_seconds": 1800.0, "live_execution": True, "restart_backoff_seconds": 30.0,
@@ -148,6 +148,28 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now: calls.append(("act", current)))
     collector.run_tick(_cfg(), None)
     assert calls == ["snapshot", "probe", "earnings", "save_ema", "samples", ("act", "a")]
+
+
+def test_run_tick_keys_rows_by_host_id_and_drops_retired_models_from_the_restored_ema(monkeypatch):
+    stored = {}
+
+    def fake_load_ema(pool, host):
+        stored["load_host"] = host
+        return {"a": 0.1, "gone": 9.0}, 50.0
+
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
+    monkeypatch.setattr(collector.db, "insert_daemon_snapshot", lambda *args: None)
+    monkeypatch.setattr(collector, "_probe_self_route", lambda *args: None)
+    monkeypatch.setattr(collector, "_ingest_earnings", lambda *args: None)
+    monkeypatch.setattr(collector, "_fetch_scores", lambda cfg: ({"a": CapacitySample("a", 2, 1, 2.0)}, {"a": 0.1}))
+    monkeypatch.setattr(collector.db, "load_ema", fake_load_ema)
+    monkeypatch.setattr(collector.db, "save_ema", lambda pool, host, ema, now: stored.setdefault("ema", ema))
+    monkeypatch.setattr(collector.db, "insert_demand_samples", lambda *args: None)
+    monkeypatch.setattr(collector, "_decide", lambda cfg, pool, ema, daemon, now: Decision("a", "keep", "KEEP"))
+    monkeypatch.setattr(collector, "_record_and_act", lambda *args: None)
+    collector.run_tick(_cfg(host_label="pretty-label"), None)
+    assert stored["load_host"] == "h"  # the id, not the display label, keys the row
+    assert "gone" not in stored["ema"] and "a" in stored["ema"]
 
 
 def test_run_tick_waits_and_leaves_the_ema_untouched_when_no_model_is_scored(monkeypatch):

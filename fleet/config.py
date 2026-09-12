@@ -49,6 +49,7 @@ class Config:
     ssh_key_path: str | None
     remote_python: str
     host_label: str
+    host_id: str
     host_spec: str
     database_url: str
     poll_interval_seconds: float
@@ -86,10 +87,10 @@ def _database_url() -> str:
     return url
 
 
-def _require_unique_labels(configs: list[Config]) -> None:
-    labels = [c.host_label for c in configs]
-    if len(set(labels)) != len(labels):
-        raise RuntimeError(f"host labels are the database identity and must be unique: {labels}")
+def _require_unique(configs: list[Config], field: str, what: str) -> None:
+    values = [getattr(c, field) for c in configs]
+    if len(set(values)) != len(values):
+        raise RuntimeError(f"{what} must be unique: {values}")
 
 
 def load_configs() -> tuple[Config, ...]:
@@ -128,6 +129,7 @@ def load_configs() -> tuple[Config, ...]:
             ssh_key_path=os.environ.get(prefix + "SSH_KEY_PATH") or None,
             remote_python=os.environ.get(prefix + "REMOTE_PYTHON", "python3"),
             host_label=os.environ.get(prefix + "LABEL", ssh_target),
+            host_id=os.environ.get(prefix + "ID") or ssh_target,
             host_spec=os.environ.get(prefix + "SPEC", "unknown"),
             models=models,
             live_execution=_bool_env(prefix + "LIVE_EXECUTION", default_live),
@@ -140,5 +142,6 @@ def load_configs() -> tuple[Config, ...]:
             "At least one host is required: set DARKBLOOM_HOST_1_SSH_TARGET "
             "(an SSH host/alias, e.g. from ~/.ssh/config), plus _LABEL/_SPEC/_MODELS as needed"
         )
-    _require_unique_labels(configs)
+    _require_unique(configs, "host_id", "host ids are the database identity and")
+    _require_unique(configs, "host_label", "host labels (display only)")
     return tuple(configs)

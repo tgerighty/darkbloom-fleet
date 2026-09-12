@@ -123,7 +123,7 @@ def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float | 
 
 
 def build_status(cfg: Config, pool: ConnectionPool) -> Row:
-    host = cfg.host_label
+    host = cfg.host_id
     daemon = latest_daemon(pool, host)
     now = time.time()
     demand = latest_demand_table(pool, host)

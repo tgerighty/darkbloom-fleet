@@ -60,9 +60,12 @@ services:
       # Consumer key for the self-route routability probe (read-only listing).
       DARKBLOOM_API_KEY_FILE: /run/secrets/darkbloom_fleet_api_key
       DARKBLOOM_HOST_1_SSH_TARGET: m3-48-1
+      # The _ID pins the database identity; _LABEL stays free to edit.
+      DARKBLOOM_HOST_1_ID: m3-48-1
       DARKBLOOM_HOST_1_LABEL: m3-48-1
       DARKBLOOM_HOST_1_SPEC: Apple M3 Max, 48GB RAM, 40 GPU cores
       DARKBLOOM_HOST_2_SSH_TARGET: M1-64-1
+      DARKBLOOM_HOST_2_ID: M1-64-1
       DARKBLOOM_HOST_2_LABEL: M1-64-1
       DARKBLOOM_HOST_2_SPEC: Apple M1 Max, 64GB RAM, 24 GPU cores
       # Qwen3.5-9B is deliberately absent: loading it breaks the provider's

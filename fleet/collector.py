@@ -42,7 +42,7 @@ def _fetch_scores(cfg: Config) -> tuple[dict[str, CapacitySample], dict[str, flo
 
 
 def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
-    host = cfg.host_label
+    host = cfg.host_id
     since_rowid = db.last_payout_rowid(pool, host)
     try:
         payouts = remote.fetch_new_payouts(cfg, since_rowid)
@@ -71,11 +71,11 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
     known, so the only safe decision is to wait for the next tick."""
     if daemon is None or not daemon.fresh:
         return Decision(None, "daemon state unavailable or stale", "WAIT")
-    anchor = db.dwell_anchor(pool, cfg.host_label, daemon.started_at)
+    anchor = db.dwell_anchor(pool, cfg.host_id, daemon.started_at)
     # The measured post-restart penalty replaces the configured estimate once
     # enough completed sessions exist (routability.measured_switch_cost); the
     # configured value stays the fallback.
-    measured = routability.measured_switch_cost(pool, cfg.host_label)
+    measured = routability.measured_switch_cost(pool, cfg.host_id)
     guardrails = Guardrails(
         relative_margin=cfg.relative_margin, absolute_margin=cfg.absolute_margin,
         switch_cost_seconds=measured[0] if measured else cfg.switch_cost_seconds,
@@ -128,7 +128,7 @@ def _maybe_launch_fast_poll(cfg: Config, decision: Decision) -> None:
 
 def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     now = time.time()
-    host = cfg.host_label
+    host = cfg.host_id
 
     daemon = _fetch_daemon(cfg, now)
     if daemon is not None:
@@ -147,6 +147,9 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
         return
 
     ema_prev, last_updated = db.load_ema(pool, host)
+    # A model removed from DARKBLOOM_HOST_<N>_MODELS must not survive in the
+    # restored EMA — its stale score could still win a decision.
+    ema_prev = {model: value for model, value in ema_prev.items() if model in cfg.models}
     dt = max(1.0, now - last_updated) if last_updated else cfg.poll_interval_seconds
     ema = decision_mod.update_ema(ema_prev, scores, dt, cfg.ema_tau_minutes)
     if ema:
@@ -165,9 +168,9 @@ def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current
     would never end."""
     mode = "live" if cfg.live_execution else "observe"
     if (result.action == "SWITCH" and cfg.live_execution
-            and now - db.last_failed_switch_at(pool, cfg.host_label) < cfg.restart_backoff_seconds):
+            and now - db.last_failed_switch_at(pool, cfg.host_id) < cfg.restart_backoff_seconds):
         result = Decision(result.target, f"{result.reason}; restart-retry backoff: waiting after a recent failed attempt", "BLOCKED")
-    decision_id = db.insert_decision(pool, cfg.host_label, now, current_model, result, Outcome(mode, False, None))
+    decision_id = db.insert_decision(pool, cfg.host_id, now, current_model, result, Outcome(mode, False, None))
     executed, error = _maybe_execute(cfg, pool, result, now)
     if executed or error:
         db.record_outcome(pool, decision_id, Outcome(mode, executed, error))
