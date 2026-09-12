@@ -51,6 +51,16 @@ def test_run_start_invokes_darkbloom_for_the_target(watcher, monkeypatch):
     assert seen["args"][1:4] == ["start", "--model", "b"]
 
 
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired("darkbloom", 60), FileNotFoundError("darkbloom")])
+def test_a_hung_or_missing_cli_is_a_failed_switch(watcher, monkeypatch, error):
+    def fake_run(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(watcher.subprocess, "run", fake_run)
+    assert watcher.execute_switch("b") is False
+    assert "FAILED" in watcher.LOG.read_text()
+
+
 def test_execute_switch_retries_once_after_a_launchd_bootstrap_race(watcher, monkeypatch):
     results = iter([_completed(1, "Bootstrap failed: 5: Input/output error"), _completed(0)])
     monkeypatch.setattr(watcher, "_run_start", lambda target: next(results))

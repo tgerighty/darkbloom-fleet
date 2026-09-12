@@ -60,7 +60,7 @@ def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str,
     totals: dict[str, float] = {}
     for prev, nxt in pairwise(points):
         model = prev["current_model"]
-        if model and 0 < nxt["observed_at"] - prev["observed_at"] < OUTAGE_GAP_SECONDS:
+        if model and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS:
             held = nxt["observed_at"] - max(prev["observed_at"], since)
             totals[model] = totals.get(model, 0.0) + held
     covered = sum(totals.values())

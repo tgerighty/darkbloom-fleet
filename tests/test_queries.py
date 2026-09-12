@@ -26,6 +26,10 @@ def test_gaps_longer_than_ten_minutes_count_as_outage():
     assert shares == {"a": 100.0}
 
 
+def test_a_gap_of_exactly_ten_minutes_still_counts_as_serving():
+    assert _serving_shares([_snap(0, "a"), _snap(600, "b")], since=0, now=660) == {"a": 90.9, "b": 9.1}
+
+
 def test_a_stale_final_snapshot_does_not_cover_the_window():
     assert _serving_shares([_snap(0, "a")], since=0, now=1000) == {}
 

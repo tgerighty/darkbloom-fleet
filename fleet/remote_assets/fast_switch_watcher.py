@@ -112,10 +112,12 @@ def _should_switch(target: str | None, state: dict[str, object] | None) -> bool:
 
 
 def _run_start(target: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(DARKBLOOM_BIN), "start", "--model", target, "--idle-timeout", "0"],
-        capture_output=True, text=True, timeout=60, check=False,
-    )
+    """A hung or missing CLI is a failed start, so main records it for the backoff."""
+    command = [str(DARKBLOOM_BIN), "start", "--model", target, "--idle-timeout", "0"]
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+    except (subprocess.TimeoutExpired, OSError) as error:
+        return subprocess.CompletedProcess(command, -1, stdout="", stderr=str(error))
 
 
 def _verify(target: str) -> bool:

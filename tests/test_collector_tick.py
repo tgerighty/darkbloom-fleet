@@ -58,6 +58,11 @@ def test_decide_anchors_dwell_on_the_daemon_start(monkeypatch):
     assert result.action == "KEEP" and anchors == [100.0]
 
 
+@pytest.mark.parametrize("daemon", [None, DaemonState("a", ("a",), False, 1, 100.0, False)])
+def test_decide_waits_without_a_fresh_daemon_read(daemon):
+    assert collector._decide(_cfg(), None, {"a": 1.0, "b": 9.0}, daemon, 10_000.0).action == "WAIT"
+
+
 @pytest.mark.parametrize(("action", "live"), [("KEEP", True), ("SWITCH", False)])
 def test_maybe_execute_does_nothing_unless_a_live_switch_is_due(action, live):
     assert collector._maybe_execute(_cfg(live_execution=live), None, Decision("b", "r", action), 0.0) == (False, None)
