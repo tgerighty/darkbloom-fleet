@@ -57,16 +57,29 @@ def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[R
         ).fetchall()
 
 
+def recent_earnings(pool: ConnectionPool, host: str, limit: int = 50) -> list[Row]:
+    """Latest payouts read from this host's ledger. The ledger is
+    account-wide, so rows are not attributable to this host (see progress.md)."""
+    with pool.connection() as conn:
+        return conn.execute(
+            "SELECT created_at, model, completion_tokens, micro_usd "
+            "FROM earnings WHERE host = %s ORDER BY created_at DESC LIMIT %s",
+            (host, limit),
+        ).fetchall()
+
+
 def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
-    """Percentage of the window each model was warm, plus "idle" for the rest:
-    no model warm, or no snapshot at all. Each snapshot holds until the next
-    one (the last until now), counted only inside the window; a gap longer
-    than OUTAGE_GAP_SECONDS is an outage and counts as idle."""
-    points = [*snapshots, {"observed_at": now, "current_model": None}]
+    """Percentage of the window each model was actively serving a request,
+    plus "idle" for the rest: warm but not serving, no model, or no snapshot.
+    Each snapshot's inference_active holds until the next one (the last until
+    now), counted only inside the window; a gap longer than
+    OUTAGE_GAP_SECONDS is an outage and counts as idle. Snapshots are a minute
+    apart, so requests shorter than that are under-counted."""
+    points = [*snapshots, {"observed_at": now, "current_model": None, "inference_active": False}]
     totals: dict[str, float] = {}
     for prev, nxt in pairwise(points):
         model = prev["current_model"]
-        if model and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS:
+        if model and prev.get("inference_active") and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS:
             held = nxt["observed_at"] - max(prev["observed_at"], since)
             totals[model] = totals.get(model, 0.0) + held
     window = now - since
@@ -78,8 +91,8 @@ def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str,
 
 
 def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float | None) -> dict[str, float]:
-    """Share of the window each model was the reported current_model, including
-    the model already serving when the window opened. None = lifetime."""
+    """Share of the window each model was actively serving, including the
+    state already in force when the window opened. None = lifetime."""
     now = time.time()
     if window_seconds is None:
         with pool.connection() as conn:
@@ -92,12 +105,12 @@ def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float | 
     since = now - window_seconds
     with pool.connection() as conn:
         before = conn.execute(
-            "SELECT observed_at, current_model FROM daemon_snapshots "
+            "SELECT observed_at, current_model, inference_active FROM daemon_snapshots "
             "WHERE host = %s AND observed_at <= %s ORDER BY observed_at DESC LIMIT 1",
             (host, since),
         ).fetchone()
         rows = conn.execute(
-            "SELECT observed_at, current_model FROM daemon_snapshots "
+            "SELECT observed_at, current_model, inference_active FROM daemon_snapshots "
             "WHERE host = %s AND observed_at > %s ORDER BY observed_at",
             (host, since),
         ).fetchall()
@@ -120,5 +133,6 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600), 4),
         "serving": {name: serving_percentage(pool, host, seconds) for name, seconds in SERVING_WINDOWS.items()},
         "recent_decisions": recent_decisions(pool, host, limit=50),
+        "recent_earnings": recent_earnings(pool, host),
         "routability": routability_panel(pool, host, daemon),
     }

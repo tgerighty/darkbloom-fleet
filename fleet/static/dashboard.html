@@ -22,7 +22,8 @@
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid light-dark(#0002, #fff2); }
   th { opacity: 0.6; font-weight: 500; }
-  .scroll { max-height: 11.5rem; overflow-y: auto; }
+  .scroll { max-height: 11.5rem; overflow-y: auto; }   /* ~5 rows */
+  .scroll.tall { max-height: 21rem; }                  /* ~10 rows */
   .scroll thead th { position: sticky; top: 0; background: light-dark(#f7f7f8, #17181c); }
   .bar-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.3rem 0; }
   .bar-label { width: 12rem; font-size: 0.85rem; flex-shrink: 0; }
@@ -46,6 +47,8 @@
 
 <script type="module">
 const TD = "</td><td>";
+const TR = "<tr><td>";
+const TR_END = "</td></tr>";
 const WINDOWS = ["1h", "7h", "24h", "30d", "lifetime"];
 let servingWindow = "24h";
 let lastStatus = null;
@@ -68,7 +71,7 @@ function activityLabel(active) {
 
 function renderDemand(rows) {
   return rows.map(function (r) {
-    return "<tr><td>" + esc(r.model) + TD + r.active_requests + TD + r.warm_providers + TD + num(r.pressure, 2) + TD +
+    return TR + esc(r.model) + TD + r.active_requests + TD + r.warm_providers + TD + num(r.pressure, 2) + TD +
       num(r.output_usd_per_million, 2) + TD + num(r.score, 3) + "</td><td><b>" + num(r.ema_score, 3) + "</b></td></tr>";
   }).join("");
 }
@@ -85,8 +88,8 @@ function renderServing(shares) {
 
 function renderModels(r) {
   const modelRows = r.models.length ? r.models.map(function (m) {
-    return "<tr><td>" + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + m.routable_providers + TD +
-      fmtAge(m.last_served_at) + "</td></tr>";
+    return TR + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + m.routable_providers + TD +
+      fmtAge(m.last_served_at) + TR_END;
   }).join("") : "<tr><td colspan=5><i>no probe data yet</i></td></tr>";
   const session = r.session
     ? "daemon restarted " + fmtAge(r.session.started_at) + " · first request after " + mins(r.session.first_request_after_min) +
@@ -101,11 +104,21 @@ function renderModels(r) {
 
 function renderDecisions(decisions) {
   const rows = decisions.map(function (d) {
-    return "<tr><td>" + fmtAge(d.observed_at) + TD + esc(d.current_model || "–") + TD + esc(d.target_model || "–") + TD +
-      esc(d.action) + (d.executed ? " ✓" : "") + TD + esc(d.reason) + "</td></tr>";
+    return TR + fmtAge(d.observed_at) + TD + esc(d.current_model || "–") + TD + esc(d.target_model || "–") + TD +
+      esc(d.action) + (d.executed ? " ✓" : "") + TD + esc(d.reason) + TR_END;
   }).join("");
   return '<section><h2>Recent decisions</h2><div class="scroll"><table><thead><tr><th>when</th><th>current</th><th>target</th><th>action</th><th>reason</th></tr></thead>' +
     '<tbody>' + rows + '</tbody></table></div></section>';
+}
+
+function renderEarnings(rows) {
+  const body = rows.length ? rows.map(function (e) {
+    return TR + fmtAge(e.created_at) + TD + esc(e.model) + TD + e.completion_tokens + TD +
+      "$" + num(e.micro_usd / 1e6, 4) + TR_END;
+  }).join("") : "<tr><td colspan=4><i>no payouts recorded yet</i></td></tr>";
+  return '<section><h2>Recent payouts</h2><div class="sub">from this host&#39;s ledger, which is account-wide</div>' +
+    '<div class="scroll tall"><table><thead><tr><th>when</th><th>model</th><th>completion tokens</th><th>paid</th></tr></thead>' +
+    '<tbody>' + body + '</tbody></table></div></section>';
 }
 
 function renderHost(s, index) {
@@ -128,8 +141,10 @@ function renderHost(s, index) {
     '</div>' +
     renderModels(r) +
     '<section><h2>Serving percentage <select data-serving-window="' + index + '">' + options + '</select></h2>' +
+      '<div class="sub">share of the window actively serving a request, per model; idle = warm with no request, no model, or no data (1-minute samples)</div>' +
       '<div>' + renderServing((s.serving || {})[servingWindow]) + '</div></section>' +
     renderDecisions(s.recent_decisions) +
+    renderEarnings(s.recent_earnings || []) +
   '</div>';
 }
 

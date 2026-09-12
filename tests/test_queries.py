@@ -4,8 +4,8 @@ from fleet import queries
 from fleet.queries import _serving_shares
 
 
-def _snap(t: float, model: str | None) -> dict:
-    return {"observed_at": t, "current_model": model}
+def _snap(t: float, model: str | None, *, active: bool = True) -> dict:
+    return {"observed_at": t, "current_model": model, "inference_active": active}
 
 
 def _clock(monkeypatch, now: float) -> None:
@@ -28,6 +28,11 @@ def test_gaps_longer_than_ten_minutes_count_as_idle():
 
 def test_a_gap_of_exactly_ten_minutes_still_counts_as_serving():
     assert _serving_shares([_snap(0, "a"), _snap(600, "b")], since=0, now=660) == {"a": 90.9, "b": 9.1, "idle": 0.0}
+
+
+def test_a_warm_but_idle_model_counts_as_idle():
+    shares = _serving_shares([_snap(0, "a", active=False), _snap(300, "a")], since=0, now=400)
+    assert shares == {"a": 25.0, "idle": 75.0}
 
 
 def test_a_stale_final_snapshot_is_all_idle():
@@ -59,9 +64,10 @@ def test_lifetime_serving_starts_at_the_first_snapshot(fake_pool, monkeypatch):
 def _status_responses(daemon, demand, decisions):
     """Canned rows in the order build_status queries them: daemon, demand,
     earnings x2, four fixed windows (before + rows each), lifetime's first
-    snapshot, decisions, self-route probe, last-served."""
+    snapshot, decisions, earnings rows, self-route probe, last-served."""
     return [daemon, demand, [{"total": 2_500_000}], [{"total": 500_000}],
-            *([[], []] * 4), [{"t": None}], decisions, [{"t": None}], []]
+            *([[], []] * 4), [{"t": None}], decisions,
+            [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}], [{"t": None}], []]
 
 
 def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
@@ -75,6 +81,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
+    assert status["recent_earnings"] == [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}]
     assert status["routability"] == {"self_route_as_of": None, "trust_level": None, "trust_reason": None,
                                      "last_served_at": None, "models": [], "session": None}
 
