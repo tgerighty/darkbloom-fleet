@@ -93,7 +93,7 @@ def _require_unique(configs: list[Config], field: str, what: str) -> None:
         raise RuntimeError(f"{what} must be unique: {values}")
 
 
-def _host_config(n: int, ssh_target: str, shared: dict) -> Config:
+def _host_config(n: int, ssh_target: str, shared: dict[str, object]) -> Config:
     prefix = f"DARKBLOOM_HOST_{n}_"
     models_raw = os.environ.get(prefix + "MODELS")
     models = tuple(m.strip() for m in models_raw.split(",") if m.strip()) if models_raw else DEFAULT_MODELS
