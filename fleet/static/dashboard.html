@@ -139,6 +139,7 @@ function renderHost(s, index) {
     '</div>' +
     renderModels(r) +
     '<section><h2>Serving percentage <select data-serving-window="' + index + '">' + options + '</select></h2>' +
+      '<div class="sub">share of the window actively serving a request, per model; idle = warm but no request (1-minute samples)</div>' +
       '<div>' + renderServing((s.serving || {})[servingWindow]) + '</div></section>' +
     renderDecisions(s.recent_decisions) +
     renderEarnings(s.recent_earnings || []) +

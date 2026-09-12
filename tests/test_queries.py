@@ -4,8 +4,8 @@ from fleet import queries
 from fleet.queries import _serving_shares
 
 
-def _snap(t: float, model: str | None) -> dict:
-    return {"observed_at": t, "current_model": model}
+def _snap(t: float, model: str | None, active: bool = True) -> dict:
+    return {"observed_at": t, "current_model": model, "inference_active": active}
 
 
 def _clock(monkeypatch, now: float) -> None:
@@ -28,6 +28,11 @@ def test_gaps_longer_than_ten_minutes_count_as_idle():
 
 def test_a_gap_of_exactly_ten_minutes_still_counts_as_serving():
     assert _serving_shares([_snap(0, "a"), _snap(600, "b")], since=0, now=660) == {"a": 90.9, "b": 9.1, "idle": 0.0}
+
+
+def test_a_warm_but_idle_model_counts_as_idle():
+    shares = _serving_shares([_snap(0, "a", active=False), _snap(300, "a")], since=0, now=400)
+    assert shares == {"a": 25.0, "idle": 75.0}
 
 
 def test_a_stale_final_snapshot_is_all_idle():
