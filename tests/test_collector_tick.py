@@ -122,6 +122,7 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
 
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
     monkeypatch.setattr(collector.db, "insert_daemon_snapshot", record("snapshot"))
+    monkeypatch.setattr(collector, "_probe_self_route", record("probe"))
     monkeypatch.setattr(collector, "_fetch_scores", lambda cfg: ({"a": CapacitySample("a", 2, 1, 2.0)}, {"a": 0.1}))
     monkeypatch.setattr(collector.db, "load_ema", lambda pool, host: ({"a": 0.1}, 50.0))
     monkeypatch.setattr(collector.db, "save_ema", record("save_ema"))
@@ -130,4 +131,4 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector, "_decide", lambda cfg, pool, ema, daemon, now: Decision("a", "keep", "KEEP"))
     monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now: calls.append(("act", current)))
     collector.run_tick(_cfg(), None)
-    assert calls == ["snapshot", "save_ema", "samples", "earnings", ("act", "a")]
+    assert calls == ["snapshot", "probe", "save_ema", "samples", "earnings", ("act", "a")]

@@ -76,6 +76,7 @@ def test_fetch_daemon_state_parses_and_judges_freshness(monkeypatch):
                           '"pid": "42", "started_at": 5, "written_at": 1000}')
     assert remote.fetch_daemon_state(_cfg(False), now=1050.0) == DaemonState("a", ("a",), True, 42, 5.0, True)
     assert remote.fetch_daemon_state(_cfg(False), now=2000.0).fresh is False
+    assert remote.fetch_daemon_state(_cfg(False), now=900.0).fresh is False  # future-dated state is not fresh
 
 
 def test_fetch_daemon_state_reads_advertised_models_and_the_request_counter(monkeypatch):

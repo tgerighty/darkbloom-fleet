@@ -82,12 +82,14 @@ function renderServing(shares) {
 function renderHost(s, index) {
   const badge = '<span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span>';
   const subtitle = badge + " · daemon " + fmtAge(s.as_of) +
-    (s.daemon_fresh ? "" : " (stale)") + (s.inference_active ? " · serving a request" : " · idle");
+    (s.daemon_fresh ? "" : " (stale)") +
+    (s.inference_active === null || s.inference_active === undefined ? " · state unknown" : s.inference_active ? " · serving a request" : " · idle");
 
-  const r = s.routability || { models: [], session: null, self_route_as_of: null };
+  const r = s.routability || { models: [], session: null, self_route_as_of: null, last_served_at: null };
   const modelRows = r.models.length ? r.models.map(function (m) {
-    return "<tr><td>" + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + m.routable_providers + "</td></tr>";
-  }).join("") : "<tr><td colspan=4><i>no probe data yet</i></td></tr>";
+    return "<tr><td>" + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + m.routable_providers + TD +
+      fmtAge(m.last_served_at) + "</td></tr>";
+  }).join("") : "<tr><td colspan=5><i>no probe data yet</i></td></tr>";
   const session = r.session
     ? "daemon restarted " + fmtAge(r.session.started_at) + " · first request after " + mins(r.session.first_request_after_min) +
       " · any host routable after " + mins(r.session.any_host_routable_after_min)
@@ -107,11 +109,12 @@ function renderHost(s, index) {
     '<div class="sub">' + subtitle + '</div>' +
     '<div class="kpis">' +
       '<div class="kpi"><div class="value">' + esc(s.current_model || "none") + '</div><div class="label">current model</div></div>' +
+      '<div class="kpi"><div class="value">' + fmtAge(r.last_served_at) + '</div><div class="label">last served</div></div>' +
       '<div class="kpi"><div class="value">$' + num(s.earnings_usd_24h, 2) + '</div><div class="label">$ earned / 24h</div></div>' +
       '<div class="kpi"><div class="value">$' + num(s.earnings_usd_1h, 4) + '</div><div class="label">$ earned / 1h</div></div>' +
     '</div>' +
     '<section><h2>Models: advertised / warm / routable</h2><div class="sub">' + esc(session) + '<br>' + esc(probeNote) + '</div>' +
-      '<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>routable providers</th></tr></thead><tbody>' + modelRows + '</tbody></table></section>' +
+      '<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>routable providers</th><th>last served</th></tr></thead><tbody>' + modelRows + '</tbody></table></section>' +
     '<section><h2>Serving percentage <select data-serving-window="' + index + '">' + options + '</select></h2>' +
       '<div>' + renderServing((s.serving || {})[servingWindow]) + '</div></section>' +
     '<section><h2>Recent decisions</h2><div class="scroll"><table><thead><tr><th>when</th><th>current</th><th>target</th><th>action</th><th>reason</th></tr></thead>' +

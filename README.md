@@ -4,7 +4,7 @@ A standalone service for managing and optimizing revenue across a small
 fleet of Macs serving inference on the [darkbloom](https://darkbloom.dev)
 network. Starts with one host, designed to grow to a handful.
 
-**Status: v1 implemented — single host, observe/dry-run by default.** See
+**Status: v1 implemented — multi-host, observe/dry-run by default.** See
 below for what's decided, what's running, and what's still deferred.
 
 ## Credit

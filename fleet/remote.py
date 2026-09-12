@@ -62,7 +62,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         inference_active=bool(payload.get("inference_active")),
         pid=int(payload.get("pid") or 0),
         started_at=float(payload.get("started_at") or 0),
-        fresh=written_at > 0 and current_time - written_at <= cfg.daemon_freshness_seconds,
+        fresh=written_at > 0 and 0 <= current_time - written_at <= cfg.daemon_freshness_seconds,
         advertised_models=_model_ids(payload, "advertised_models"),
         requests_served=int((payload.get("stats") or {}).get("requests_served") or 0),
     )

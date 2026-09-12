@@ -59,9 +59,9 @@ def test_lifetime_serving_starts_at_the_first_snapshot(fake_pool, monkeypatch):
 def _status_responses(daemon, demand, decisions):
     """Canned rows in the order build_status queries them: daemon, demand,
     earnings x2, four fixed windows (before + rows each), lifetime's first
-    snapshot, decisions, self-route probe."""
+    snapshot, decisions, self-route probe, last-served."""
     return [daemon, demand, [{"total": 2_500_000}], [{"total": 500_000}],
-            *([[], []] * 4), [{"t": None}], decisions, [{"t": None}]]
+            *([[], []] * 4), [{"t": None}], decisions, [{"t": None}], []]
 
 
 def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
@@ -75,7 +75,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
-    assert status["routability"] == {"self_route_as_of": None, "models": [], "session": None}
+    assert status["routability"] == {"self_route_as_of": None, "last_served_at": None, "models": [], "session": None}
 
 
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):

@@ -24,7 +24,8 @@ def test_fetch_self_route_sends_the_key_and_reads_routable_counts(monkeypatch):
 
     def fake_get(url, headers=None):
         seen.update(url=url, headers=headers)
-        return {"data": [{"id": "a", "metadata": {"routable_providers": 2}}, {"id": "b"}, "junk", {"metadata": {}}]}
+        return {"data": [{"id": "a", "metadata": {"routable_providers": 2}}, {"id": "b"}, "junk", {"metadata": {}},
+                         {"id": "c", "metadata": {"routable_providers": "lots"}}]}
 
     monkeypatch.setattr(demand, "_get_json", fake_get)
     assert demand.fetch_self_route("https://x/", "k") == {"a": 2, "b": 0}

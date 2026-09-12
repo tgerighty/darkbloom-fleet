@@ -22,21 +22,28 @@ def test_session_timing_before_anything_happened(fake_pool):
     assert timing["any_host_routable_after_min"] is None and timing["first_request_after_min"] is None
 
 
+def test_last_served_per_model(fake_pool):
+    pool = fake_pool([{"model": "a", "t": 500.0}, {"model": "b", "t": 900.0}])
+    assert routability.last_served(pool, "h") == {"a": 500.0, "b": 900.0}
+
+
 def test_the_panel_merges_the_host_view_with_the_account_view(fake_pool):
-    pool = fake_pool([{"t": 100.0}], [{"model": "gemma-4-26b", "routable_providers": 1}], [{"t": 130.0}], [{"t": None}])
+    pool = fake_pool([{"t": 100.0}], [{"model": "gemma-4-26b", "routable_providers": 1}],
+                     [{"model": "gpt-oss-20b", "t": 90.0}, {"model": "old-model", "t": 20.0}], [{"t": 130.0}], [{"t": None}])
     daemon = {"advertised_models": ["gpt-oss-20b", "gemma-4-26b-qat-4bit"], "warm_models": ["gpt-oss-20b", "z-warm-only"],
               "started_at": 70.0}
     panel = routability.routability_panel(pool, "h", daemon)
-    assert panel["self_route_as_of"] == 100.0
+    assert panel["self_route_as_of"] == 100.0 and panel["last_served_at"] == 90.0
     assert panel["models"] == [
-        {"model": "gemma-4-26b", "advertised": False, "warm": False, "routable_providers": 1},
-        {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 0},
-        {"model": "gpt-oss-20b", "advertised": True, "warm": True, "routable_providers": 0},
-        {"model": "z-warm-only", "advertised": False, "warm": True, "routable_providers": 0},
+        {"model": "gemma-4-26b", "advertised": False, "warm": False, "routable_providers": 1, "last_served_at": None},
+        {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 0, "last_served_at": None},
+        {"model": "gpt-oss-20b", "advertised": True, "warm": True, "routable_providers": 0, "last_served_at": 90.0},
+        {"model": "old-model", "advertised": False, "warm": False, "routable_providers": 0, "last_served_at": 20.0},
+        {"model": "z-warm-only", "advertised": False, "warm": True, "routable_providers": 0, "last_served_at": None},
     ]
     assert panel["session"] == {"started_at": 70.0, "any_host_routable_after_min": 1.0, "first_request_after_min": None}
 
 
 def test_the_panel_without_a_daemon_snapshot(fake_pool):
-    panel = routability.routability_panel(fake_pool([{"t": None}]), "h", None)
-    assert panel == {"self_route_as_of": None, "models": [], "session": None}
+    panel = routability.routability_panel(fake_pool([{"t": None}], []), "h", None)
+    assert panel == {"self_route_as_of": None, "last_served_at": None, "models": [], "session": None}

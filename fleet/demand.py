@@ -35,7 +35,10 @@ def _routable_count(row: object) -> tuple[str, int] | None:
         return None
     meta = row.get("metadata")
     routable = meta.get("routable_providers") if isinstance(meta, dict) else 0
-    return str(row["id"]), int(routable or 0)
+    try:
+        return str(row["id"]), int(routable or 0)
+    except (TypeError, ValueError):
+        return None
 
 
 def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
@@ -47,7 +50,7 @@ def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
     headers = {"Authorization": f"Bearer {api_key}", "X-Darkbloom-Route": "self"}
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models", headers)
     rows = payload.get("data") if isinstance(payload, dict) else None
-    return dict(c for row in (rows if isinstance(rows, list) else []) if (c := _routable_count(row)))
+    return {c[0]: c[1] for row in (rows if isinstance(rows, list) else []) if (c := _routable_count(row))}
 
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
