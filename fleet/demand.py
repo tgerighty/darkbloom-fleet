@@ -5,7 +5,7 @@ warm_model_manager.py's fetch_output_prices() — stdlib only, no SSH needed.
 from __future__ import annotations
 
 import json
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .scoring import pressure_from_capacity
 from .types import CapacitySample
@@ -14,10 +14,28 @@ USER_AGENT = "darkbloom-fleet/0.1"
 Json = dict[str, object] | list[object]
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    """An authenticated request must never follow a redirect: the bearer
+    token would be replayed to whatever origin the redirect names."""
+
+    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+
 def _get_json(url: str, headers: dict[str, str] | None = None) -> Json:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT, **(headers or {})})
-    with urlopen(request, timeout=20) as response:
+    opener = build_opener(_NoRedirect()).open if headers else urlopen
+    with opener(request, timeout=20) as response:
         return json.load(response)
+
+
+def _routable_count(row: object) -> tuple[str, int] | None:
+    """(model id, routable providers) from one self-route listing row."""
+    if not isinstance(row, dict) or not row.get("id"):
+        return None
+    meta = row.get("metadata")
+    routable = meta.get("routable_providers") if isinstance(meta, dict) else 0
+    return str(row["id"]), int(routable or 0)
 
 
 def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
@@ -29,13 +47,7 @@ def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
     headers = {"Authorization": f"Bearer {api_key}", "X-Darkbloom-Route": "self"}
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models", headers)
     rows = payload.get("data") if isinstance(payload, dict) else None
-    counts: dict[str, int] = {}
-    for row in rows if isinstance(rows, list) else []:
-        if isinstance(row, dict) and row.get("id"):
-            meta = row.get("metadata")
-            routable = meta.get("routable_providers") if isinstance(meta, dict) else 0
-            counts[str(row["id"])] = int(routable or 0)
-    return counts
+    return dict(c for row in (rows if isinstance(rows, list) else []) if (c := _routable_count(row)))
 
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:

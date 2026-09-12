@@ -61,7 +61,7 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None) -> Ro
         "self_route_as_of": as_of,
         "models": [
             {"model": m, "advertised": m in advertised, "warm": m in warm, "routable_providers": counts.get(m, 0)}
-            for m in sorted(set(advertised) | set(counts))
+            for m in sorted(set(advertised) | warm | set(counts))
         ],
         "session": session_timing(pool, host, started_at) if started_at else None,
     }

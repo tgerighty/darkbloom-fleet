@@ -13,6 +13,10 @@ from .routability import routability_panel
 
 DAY_SECONDS = 86_400
 OUTAGE_GAP_SECONDS = 600
+# Dashboard serving windows; None = lifetime (since the first snapshot).
+SERVING_WINDOWS: dict[str, float | None] = {
+    "1h": 3600, "7h": 7 * 3600, "24h": DAY_SECONDS, "30d": 30 * DAY_SECONDS, "lifetime": None,
+}
 Row = dict[str, object]
 
 
@@ -54,9 +58,10 @@ def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[R
 
 
 def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
-    """Percentage of covered window time per model. Each snapshot holds until
-    the next one (the last until now), counted only inside the window; a gap
-    longer than OUTAGE_GAP_SECONDS is an outage and counts for nobody."""
+    """Percentage of the window each model was warm, plus "idle" for the rest:
+    no model warm, or no snapshot at all. Each snapshot holds until the next
+    one (the last until now), counted only inside the window; a gap longer
+    than OUTAGE_GAP_SECONDS is an outage and counts as idle."""
     points = [*snapshots, {"observed_at": now, "current_model": None}]
     totals: dict[str, float] = {}
     for prev, nxt in pairwise(points):
@@ -64,14 +69,26 @@ def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str,
         if model and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS:
             held = nxt["observed_at"] - max(prev["observed_at"], since)
             totals[model] = totals.get(model, 0.0) + held
-    covered = sum(totals.values())
-    return {model: round(100 * seconds / covered, 1) for model, seconds in totals.items()} if covered else {}
+    window = now - since
+    if window <= 0:
+        return {}
+    shares = {model: round(100 * seconds / window, 1) for model, seconds in totals.items()}
+    shares["idle"] = round(100 * max(window - sum(totals.values()), 0.0) / window, 1)
+    return shares
 
 
-def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float) -> dict[str, float]:
+def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float | None) -> dict[str, float]:
     """Share of the window each model was the reported current_model, including
-    the model already serving when the window opened."""
+    the model already serving when the window opened. None = lifetime."""
     now = time.time()
+    if window_seconds is None:
+        with pool.connection() as conn:
+            first = conn.execute(
+                "SELECT min(observed_at) AS t FROM daemon_snapshots WHERE host = %s", (host,)
+            ).fetchone()
+        if not first or first["t"] is None:
+            return {}
+        window_seconds = now - float(first["t"])
     since = now - window_seconds
     with pool.connection() as conn:
         before = conn.execute(
@@ -101,7 +118,7 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "demand": latest_demand_table(pool, host),
         "earnings_usd_24h": round(earnings_usd(pool, host, now - DAY_SECONDS), 4),
         "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600), 4),
-        "serving_percentage_24h": serving_percentage(pool, host, DAY_SECONDS),
-        "recent_decisions": recent_decisions(pool, host),
+        "serving": {name: serving_percentage(pool, host, seconds) for name, seconds in SERVING_WINDOWS.items()},
+        "recent_decisions": recent_decisions(pool, host, limit=50),
         "routability": routability_panel(pool, host, daemon),
     }

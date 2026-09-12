@@ -31,6 +31,20 @@ def test_fetch_self_route_sends_the_key_and_reads_routable_counts(monkeypatch):
     assert seen == {"url": "https://x/v1/models", "headers": {"Authorization": "Bearer k", "X-Darkbloom-Route": "self"}}
 
 
+def test_an_authenticated_request_refuses_redirects(monkeypatch):
+    seen = {}
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            seen["auth"] = request.get_header("Authorization")
+            return io.BytesIO(b'{"data": []}')
+
+    monkeypatch.setattr(demand, "build_opener", lambda handler: seen.setdefault("handler", handler) and FakeOpener())
+    assert demand._get_json("https://x", {"Authorization": "Bearer k"}) == {"data": []}
+    assert seen["auth"] == "Bearer k" and isinstance(seen["handler"], demand._NoRedirect)
+    assert seen["handler"].redirect_request(None, None, 302, "Found", {}, "https://elsewhere") is None
+
+
 def test_a_self_route_payload_of_the_wrong_shape_yields_nothing(monkeypatch):
     monkeypatch.setattr(demand, "_get_json", lambda url, headers=None: ["nope"])
     assert demand.fetch_self_route("https://x", "k") == {}
