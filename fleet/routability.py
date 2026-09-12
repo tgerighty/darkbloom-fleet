@@ -71,21 +71,22 @@ def last_served(pool: ConnectionPool, host: str) -> dict[str, float]:
 def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None) -> Row:
     as_of, counts = latest_self_route(pool)
     served = last_served(pool, host)
-    advertised = list(daemon.get("advertised_models") or []) if daemon else []
-    warm = set(daemon.get("warm_models") or []) if daemon else set()
-    started_at = float(daemon.get("started_at") or 0) if daemon else 0.0
+    snapshot = daemon or {}
+    advertised = set(snapshot.get("advertised_models") or [])
+    warm = set(snapshot.get("warm_models") or [])
+    started_at = float(snapshot.get("started_at") or 0)
     return {
         "self_route_as_of": as_of,
         # The coordinator only routes to hardware-trusted providers; after a
         # restart the level drops to self_signed until MDM and Apple device
-        # attestation re-verify. This is the per-host penalty-box signal.
-        "trust_level": daemon.get("trust_level") if daemon else None,
-        "trust_reason": daemon.get("trust_reason") if daemon else None,
+        # attestation re-verify. One of the per-host penalty-box signals.
+        "trust_level": snapshot.get("trust_level"),
+        "trust_reason": snapshot.get("trust_reason"),
         "last_served_at": max(served.values()) if served else None,
         "models": [
             {"model": m, "advertised": m in advertised, "warm": m in warm,
              "routable_providers": counts.get(m, 0), "last_served_at": served.get(m)}
-            for m in sorted(set(advertised) | warm | set(counts) | set(served))
+            for m in sorted(advertised | warm | set(counts) | set(served))
         ],
         "session": session_timing(pool, host, started_at) if started_at else None,
     }

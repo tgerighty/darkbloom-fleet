@@ -50,7 +50,10 @@ def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
     headers = {"Authorization": f"Bearer {api_key}", "X-Darkbloom-Route": "self"}
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models", headers)
     rows = payload.get("data") if isinstance(payload, dict) else None
-    return {c[0]: c[1] for row in (rows if isinstance(rows, list) else []) if (c := _routable_count(row))}
+    if not isinstance(rows, list):
+        # A wrong-shaped 200 must not be recorded as "nothing routable".
+        raise TypeError("self-route payload is not a model listing")
+    return {c[0]: c[1] for row in rows if (c := _routable_count(row))}
 
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
