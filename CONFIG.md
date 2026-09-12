@@ -85,8 +85,28 @@ Shared by every host:
 | `FLEET_RESTART_BACKOFF_SECONDS` | `30` | Cooldown after a failed switch attempt before retrying. |
 | `FLEET_DASHBOARD_PORT` | `8080` | Port the dashboard/API listens on. |
 
-## Safety default: OBSERVE / DRY-RUN
+## Per-host card data (no new env vars)
 
+The dashboard's per-host console card and `/api/status`'s `card` block are fed
+by two data points the tick reads alongside `daemon-state.json`, in the same
+SSH round trip:
+
+- The Mac widget's metrics DB, latest sample
+  (`sqlite3 ~/.darkbloom-widget/metrics.db "select json from samples order by
+  timestamp desc limit 1"`): `thermalState`, `memoryPressure` (0-1),
+  `cpuUsage` (0-1), `fanRPM`, `gpuActiveGb`, `peakTemperatureC`. A missing or
+  malformed widget row degrades to NULL columns — it never fails the daemon
+  read — and `gpuActiveGb` only stands in for GPU memory when the daemon's own
+  capacity section has no `gpu_memory_active_gb`.
+- The daemon state's `capacity` (`gpu_memory_active_gb`,
+  `gpu_memory_cache_gb`, `total_memory_gb`) and `slots` (per resident model:
+  `model`, `kv_backend`, `mtp_enabled`, `mtp_active`,
+  `mtp_inactive_reason`).
+
+Both land in `daemon_snapshots` (one ALTER-added column each; `slots` as
+JSONB), so the card needs no extra endpoint and history is queryable.
+
+## Safety default: OBSERVE / DRY-RUN
 `FLEET_LIVE_EXECUTION` defaults to `false`. In that mode the service ingests
 data, computes scores, logs and persists every decision it *would* make, and
 the dashboard shows it clearly ("OBSERVE" badge) - but it never calls

@@ -13,10 +13,19 @@ import time
 from pathlib import Path
 
 from .config import Config
-from .types import DaemonState, Payout
+from .types import DaemonState, Payout, Slot
 
 DAEMON_STATE_PATH = "~/.darkbloom/daemon-state.json"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
+WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
+_WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
+# Printed between the two documents so one SSH round trip can carry both; the
+# daemon doc is JSON, so a distinctive marker line can never occur inside it.
+_DOC_SEPARATOR = "___fleet-docs___"
+_STATE_COMMAND = (
+    f"cat {DAEMON_STATE_PATH} && printf '\\n{_DOC_SEPARATOR}\\n' && "
+    f"(sqlite3 {WIDGET_METRICS_DB_PATH} '{_WIDGET_LATEST_SQL}' || true)"
+)
 
 FAST_SWITCH_WATCHER_ASSET = Path(__file__).parent / "remote_assets" / "fast_switch_watcher.py"
 FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
@@ -50,13 +59,18 @@ def _run_ssh(cfg: Config, remote_command: str, timeout: float) -> str:
 
 
 def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
-    """Read the provider's own daemon-state.json. Raises on any failure —
-    the caller decides how to degrade; this never fabricates a state."""
-    raw = _run_ssh(cfg, f"cat {DAEMON_STATE_PATH}", timeout=15)
-    payload = json.loads(raw)
+    """Read the provider's own daemon-state.json plus the latest Mac widget
+    metrics sample in one SSH round trip. Raises only when the daemon doc
+    itself is unreadable — a missing or malformed widget row degrades to None
+    fields. The caller decides how to degrade; this never fabricates a state."""
+    raw = _run_ssh(cfg, _STATE_COMMAND, timeout=15)
+    daemon_raw, widget_raw = _split_documents(raw)
+    payload = json.loads(daemon_raw)
+    widget = _widget_metrics(widget_raw)
     current_time = time.time() if now is None else now
     written_at = float(payload.get("written_at") or 0)
     trust = _section(payload, "trust")
+    gpu_active, gpu_cache, gpu_total = _capacity_gbs(payload)
     return DaemonState(
         current_model=_text(payload.get("current_model")),
         warm_models=_model_ids(payload, "warm_models"),
@@ -69,7 +83,75 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         requests_served=int(_section(payload, "stats").get("requests_served") or 0),
         trust_level=_text(trust.get("trust_level")),
         trust_reason=_text(trust.get("reason")),
+        thermal_state=_text(widget.get("thermalState")),
+        memory_pressure=_optional_float(widget, "memoryPressure"),
+        cpu_usage=_optional_float(widget, "cpuUsage"),
+        fan_rpm=_optional_float(widget, "fanRPM"),
+        peak_temperature_c=_optional_float(widget, "peakTemperatureC"),
+        gpu_active_gb=gpu_active if gpu_active is not None else _optional_float(widget, "gpuActiveGb"),
+        gpu_cache_gb=gpu_cache,
+        total_memory_gb=gpu_total,
+        slots=_slots(payload),
     )
+
+
+def _split_documents(raw: str) -> tuple[str, str]:
+    """(daemon doc, widget doc) around the printf'd separator; no separator in
+    the output means no widget section at all."""
+    daemon, separator, widget = raw.partition(f"\n{_DOC_SEPARATOR}\n")
+    return daemon, widget if separator else ""
+
+
+def _widget_metrics(raw: str) -> dict[str, object]:
+    """The widget's latest sample row, or {} when the DB is absent (empty
+    output), empty-table, or holds anything but a JSON object."""
+    raw = raw.strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _optional_float(payload: dict[str, object], key: str) -> float | None:
+    value = payload.get(key)
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _capacity_gbs(payload: dict[str, object]) -> tuple[float | None, float | None, float | None]:
+    """(active, cache, total) GB from the daemon's capacity section; a missing
+    or malformed section leaves all three None rather than failing the read."""
+    capacity = _section(payload, "capacity")
+    return (_optional_float(capacity, "gpu_memory_active_gb"),
+            _optional_float(capacity, "gpu_memory_cache_gb"),
+            _optional_float(capacity, "total_memory_gb"))
+
+
+def _optional_bool(payload: dict[str, object], key: str) -> bool | None:
+    value = payload.get(key)
+    return bool(value) if isinstance(value, bool) else None
+
+
+def _slots(payload: dict[str, object]) -> tuple[Slot, ...]:
+    values = payload.get("slots")
+    if not isinstance(values, list):
+        return ()
+    slots = []
+    for item in values:
+        if isinstance(item, dict) and item.get("model"):
+            slots.append(Slot(
+                model=str(item["model"]),
+                kv_backend=_text(item.get("kv_backend")),
+                mtp_enabled=_optional_bool(item, "mtp_enabled"),
+                mtp_active=_optional_bool(item, "mtp_active"),
+                mtp_inactive_reason=_text(item.get("mtp_inactive_reason")),
+            ))
+    return tuple(slots)
 
 
 def _section(payload: dict[str, object], key: str) -> dict[str, object]:

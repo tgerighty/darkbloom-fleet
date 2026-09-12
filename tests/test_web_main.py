@@ -1,7 +1,10 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi.routing import Mount
+from fastapi.staticfiles import StaticFiles
 
 from fleet import main, web
 
@@ -14,6 +17,13 @@ def test_index_serves_the_dashboard():
     app = web.create_app((), pool=None)
     response = asyncio.run(_route(app, "/").endpoint())
     assert str(response.path).endswith("dashboard.html")
+
+
+def test_the_static_dir_is_mounted_for_the_page_module():
+    app = web.create_app((), pool=None)
+    mount = _route(app, "/static")
+    assert isinstance(mount, Mount) and isinstance(mount.app, StaticFiles)
+    assert Path(mount.app.directory) == web.STATIC_DIR
 
 
 def test_status_returns_one_entry_per_host(monkeypatch):

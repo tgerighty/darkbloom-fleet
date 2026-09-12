@@ -1,5 +1,10 @@
 # Progress
 
+- [NOW] [FEATURE] [IN-PROGRESS] Console-style per-host cards matching the
+  darkbloom.dev "Your fleet" page: widget metrics + daemon capacity/slots
+  ingested in the daemon-state SSH round trip (new daemon_snapshots columns),
+  `card` block in /api/status (fleet/card.py), dashboard split into
+  dashboard.html + dashboard.js served from a /static mount
 - ~~[NOW] [FEATURE] Multi-host config and dashboard~~
 - ~~[NOW] [FEATURE] Secret-file DB password and SSH config support~~
 - ~~[NOW] [FEATURE] deploy.yml and deploy/stack.yml~~
