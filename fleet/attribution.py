@@ -29,7 +29,9 @@ pair AS (
     WINDOW w AS (PARTITION BY host ORDER BY observed_at)
 ),
 vote AS (
-    SELECT DISTINCT p.provider_hash AS provider_hash, s.host AS host
+    -- One row per qualifying payout: pairs are consecutive snapshots, so a
+    -- payout falls in exactly one interval per host.
+    SELECT p.provider_hash AS provider_hash, s.host AS host
     FROM payout p JOIN pair s
       ON s.prev_at < p.created_at AND p.created_at <= s.next_at
      AND s.prev_started = s.next_started AND s.next_served > s.prev_served

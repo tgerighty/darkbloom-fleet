@@ -64,3 +64,10 @@ def test_the_panel_without_a_daemon_snapshot(fake_pool):
     assert panel == {"self_route_as_of": None, "trust_level": None, "trust_reason": None, "last_served_at": None,
                      "models": [], "session": None,
                      "switch_cost": {"configured_seconds": 300.0, "measured_seconds": None, "measured_sessions": 0}}
+
+
+def test_an_ambiguous_alias_keeps_the_coordinator_row():
+    from fleet.routability import _our_id
+    assert _our_id("gemma-4-26b", {"gemma-4-26b-8bit", "gemma-4-26b-qat-4bit"}) == "gemma-4-26b"
+    assert _our_id("gemma-4-26b", {"gemma-4-26b", "gemma-4-26b-qat-4bit"}) == "gemma-4-26b"
+    assert _our_id("gemma-4-26b", {"gemma-4-26b-qat-4bit", "gpt-oss-20b"}) == "gemma-4-26b-qat-4bit"

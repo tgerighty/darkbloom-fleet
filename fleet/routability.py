@@ -72,8 +72,12 @@ def _our_id(model: str, known: set[str]) -> str:
     """The coordinator's self-route listing uses short ids (`gemma-4-26b`)
     while our configured ids carry quantization suffixes (`gemma-4-26b-qat-4bit`):
     a coordinator id names the known model that equals it or extends it with
-    one more `-` part."""
-    return next((m for m in sorted(known) if m == model or m.startswith(model + "-")), model)
+    a `-` suffix. Two candidates (two quantizations of one model on the same
+    host) would be a guess, so the coordinator id keeps its own row."""
+    if model in known:
+        return model
+    matches = [m for m in known if m.startswith(model + "-")]
+    return matches[0] if len(matches) == 1 else model
 
 
 def _aliased_counts(counts: dict[str, int], known: set[str]) -> dict[str, int]:
