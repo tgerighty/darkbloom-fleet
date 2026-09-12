@@ -174,5 +174,5 @@ def main() -> None:
         os.close(lock_fd)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
