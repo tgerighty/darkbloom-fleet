@@ -61,6 +61,10 @@ function num(v, digits) { return v === null || v === undefined ? "–" : Number(
 function esc(v) { return v === null || v === undefined ? "" : String(v).replaceAll(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 function mins(v) { return v === null || v === undefined ? "not yet" : v + " min"; }
 function yes(v) { return v ? "yes" : "–"; }
+function activityLabel(active) {
+  if (active === null || active === undefined) return "state unknown";
+  return active ? "serving a request" : "idle";
+}
 
 function renderDemand(rows) {
   return rows.map(function (r) {
@@ -82,8 +86,7 @@ function renderServing(shares) {
 function renderHost(s, index) {
   const badge = '<span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span>';
   const subtitle = badge + " · daemon " + fmtAge(s.as_of) +
-    (s.daemon_fresh ? "" : " (stale)") +
-    (s.inference_active === null || s.inference_active === undefined ? " · state unknown" : s.inference_active ? " · serving a request" : " · idle");
+    (s.daemon_fresh ? "" : " (stale)") + " · " + activityLabel(s.inference_active);
 
   const r = s.routability || { models: [], session: null, self_route_as_of: null, last_served_at: null };
   const modelRows = r.models.length ? r.models.map(function (m) {
