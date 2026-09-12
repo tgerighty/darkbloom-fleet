@@ -46,7 +46,9 @@ def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
     many of our providers it counts as routable for each. The self-route view
     lists what is advertised and passes the routing gates, not what is warm,
     so an empty result means every owned machine is in the post-restart
-    penalty box (darkbloom-manager/analysis/switch-penalty)."""
+    penalty box (darkbloom-manager/analysis/switch-penalty). It relaxes the
+    hardware-trust floor for owned machines, so public routing additionally
+    needs the daemon's trust_level to be "hardware"."""
     headers = {"Authorization": f"Bearer {api_key}", "X-Darkbloom-Route": "self"}
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models", headers)
     rows = payload.get("data") if isinstance(payload, dict) else None

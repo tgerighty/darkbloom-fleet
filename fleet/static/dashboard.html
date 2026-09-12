@@ -92,9 +92,9 @@ function renderModels(r) {
     ? "daemon restarted " + fmtAge(r.session.started_at) + " · first request after " + mins(r.session.first_request_after_min) +
       " · any host routable after " + mins(r.session.any_host_routable_after_min)
     : "no session data";
-  const held = r.trust_level && r.trust_level !== "hardware" ? " · not routable until hardware trust returns" : "";
+  const held = r.trust_level && r.trust_level !== "hardware" ? " · no public traffic until hardware trust returns" : "";
   const trust = "trust: " + esc(r.trust_level || "unknown") + (r.trust_reason ? " (" + esc(r.trust_reason) + ")" : "") + held;
-  const probeNote = "routable = coordinator self-route view, account-wide (probed " + fmtAge(r.self_route_as_of) + ")";
+  const probeNote = "routable = coordinator self-route view for our own requests, account-wide (probed " + fmtAge(r.self_route_as_of) + ")";
   return '<section><h2>Models: advertised / warm / routable</h2><div class="sub">' + trust + '<br>' + esc(session) + '<br>' + esc(probeNote) + '</div>' +
     '<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>routable providers</th><th>last served</th></tr></thead><tbody>' + modelRows + '</tbody></table></section>';
 }
