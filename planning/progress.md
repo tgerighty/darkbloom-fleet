@@ -23,9 +23,17 @@
 - [NEXT] [REFACTOR] CodeRabbit round 4 (deferred): key hosts by an immutable
   id rather than the editable label; filter the restored EMA to cfg.models so
   a removed model cannot linger; wrap the lifespan shutdown in try/finally.
-- [NEXT] [FEATURE] Measured switch penalty: feed the routability probe's
+- ~~[NEXT] [FEATURE] Measured switch penalty: feed the routability probe's
   first-request timings back into the switch-cost guardrail instead of the
-  fixed 300 s.
+  fixed 300 s.~~ (2026-09-12: median start-to-first-request delay over the
+  last 10 sessions that served, minimum 3 — `routability.measured_switch_cost`
+  feeds `collector._decide`, configured value stays the fallback; the
+  dashboard's models panel shows measured vs configured)
+- ~~[NOW] [FIX] The coordinator's self-route listing uses short model ids
+  (`gemma-4-26b`), so the routability panel showed one model as two rows:
+  an advertised/warm row with 0 routable providers and a coordinator row
+  with 0 advertised/warm.~~ (2026-09-12: coordinator ids are mapped onto our
+  advertised/warm ids by equal-or-`-`suffix match, `routability` panel merge)
 - ~~[NEXT] [BUG] The payout ledger is account-wide on every Mac, so per-host
   earnings count other machines' payouts. Attribute payouts to a host by
   matching each provider_hash session to that host's daemon restarts.~~

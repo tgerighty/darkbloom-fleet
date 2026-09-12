@@ -77,7 +77,7 @@ Shared by every host:
 | `FLEET_EMA_TAU_MINUTES` | `20` | EMA time constant for score smoothing. |
 | `FLEET_RELATIVE_MARGIN` | `0.25` | Challenger must clear `current * (1 + margin)`. |
 | `FLEET_ABSOLUTE_MARGIN` | `0.01` | Challenger must also clear `current + margin`. |
-| `FLEET_SWITCH_COST_SECONDS` | `300` | Estimated unavailable time charged against a challenger's score. |
+| `FLEET_SWITCH_COST_SECONDS` | `300` | Estimated unavailable time charged against a challenger's score. Fallback only: once the host has 3+ past daemon sessions that served a request, each tick uses the measured median start-to-first-request delay over the last 10 such sessions instead (`routability.measured_switch_cost`); the dashboard's models panel shows which value is in force. |
 | `FLEET_DECISION_HORIZON_SECONDS` | `3600` | Window the switch cost is amortized over. |
 | `FLEET_MIN_DWELL_SECONDS` | `1800` | Minimum time before another switch is even considered. |
 | `FLEET_DAEMON_FRESHNESS_SECONDS` | `90` | A daemon-state read older than this is treated as stale, not authoritative. |

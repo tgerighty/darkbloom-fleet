@@ -68,13 +68,59 @@ def last_served(pool: ConnectionPool, host: str) -> dict[str, float]:
     return {str(r["model"]): float(r["t"]) for r in rows}
 
 
-def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None) -> Row:
+def _our_id(model: str, known: set[str]) -> str:
+    """The coordinator's self-route listing uses short ids (`gemma-4-26b`)
+    while our configured ids carry quantization suffixes (`gemma-4-26b-qat-4bit`):
+    a coordinator id names the known model that equals it or extends it with
+    one more `-` part."""
+    return next((m for m in sorted(known) if m == model or m.startswith(model + "-")), model)
+
+
+def _aliased_counts(counts: dict[str, int], known: set[str]) -> dict[str, int]:
+    """Re-key the self-route counts onto our advertised/warm ids, so one model
+    is one dashboard row; a coordinator id matching nothing known keeps its
+    own row."""
+    return {_our_id(model, known): n for model, n in counts.items()}
+
+
+def _switch_cost_sessions(pool: ConnectionPool, host: str) -> tuple[float | None, int]:
+    """(median seconds from daemon start to first served request, how many
+    sessions that covers) over the host's last 10 sessions that served at
+    least one request. A session is one distinct started_at; its delay is
+    complete the moment the first request arrives, so a session still waiting
+    (or one that never serves) simply drops out."""
+    with pool.connection() as conn:
+        row = conn.execute(
+            "WITH sessions AS ("
+            "  SELECT started_at, min(observed_at) FILTER (WHERE requests_served > 0) - started_at AS delay"
+            "  FROM daemon_snapshots WHERE host = %s GROUP BY started_at), "
+            "served AS (SELECT delay FROM sessions WHERE delay IS NOT NULL"
+            "  ORDER BY started_at DESC LIMIT 10) "
+            "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY delay) AS median, count(*) AS n FROM served",
+            (host,),
+        ).fetchone()
+    median = round(float(row["median"]), 1) if row and row["median"] is not None else None
+    return median, int(row["n"]) if row else 0
+
+
+def measured_switch_cost(pool: ConnectionPool, host: str) -> tuple[float, int] | None:
+    """The measured post-restart penalty the switch-cost guardrail uses in
+    place of the fixed DARKBLOOM_SWITCH_COST_SECONDS estimate: (median
+    seconds, session count), or None until 3 sessions have served a request —
+    fewer would make the median noise."""
+    median, n = _switch_cost_sessions(pool, host)
+    return (median, n) if median is not None and n >= 3 else None
+
+
+def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switch_cost_seconds: float) -> Row:
     as_of, counts = latest_self_route(pool)
     served = last_served(pool, host)
     snapshot = daemon or {}
     advertised = set(snapshot.get("advertised_models") or [])
     warm = set(snapshot.get("warm_models") or [])
+    counts = _aliased_counts(counts, advertised | warm)
     started_at = float(snapshot.get("started_at") or 0)
+    median, n = _switch_cost_sessions(pool, host)
     return {
         "self_route_as_of": as_of,
         # The coordinator only routes to hardware-trusted providers; after a
@@ -89,4 +135,6 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None) -> Ro
             for m in sorted(advertised | warm | set(counts) | set(served))
         ],
         "session": session_timing(pool, host, started_at) if started_at else None,
+        "switch_cost": {"configured_seconds": switch_cost_seconds,
+                        "measured_seconds": median, "measured_sessions": n},
     }

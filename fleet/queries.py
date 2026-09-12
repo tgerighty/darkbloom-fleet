@@ -143,5 +143,5 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "recent_decisions": recent_decisions(pool, host, limit=50),
         "recent_earnings": recent_earnings(pool, host, hashes),
         "unattributed_recent": unattributed_recent(pool, host, attributed),
-        "routability": routability_panel(pool, host, daemon),
+        "routability": routability_panel(pool, host, daemon, cfg.switch_cost_seconds),
     }

@@ -9,7 +9,7 @@ import time
 
 from psycopg_pool import ConnectionPool
 
-from . import db, demand, remote, scoring
+from . import db, demand, remote, routability, scoring
 from . import decision as decision_mod
 from .config import Config
 from .types import CapacitySample, DaemonState, Decision, Guardrails, Outcome
@@ -72,9 +72,14 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
     if daemon is None or not daemon.fresh:
         return Decision(None, "daemon state unavailable or stale", "WAIT")
     anchor = db.dwell_anchor(pool, cfg.host_label, daemon.started_at)
+    # The measured post-restart penalty replaces the configured estimate once
+    # enough completed sessions exist (routability.measured_switch_cost); the
+    # configured value stays the fallback.
+    measured = routability.measured_switch_cost(pool, cfg.host_label)
     guardrails = Guardrails(
         relative_margin=cfg.relative_margin, absolute_margin=cfg.absolute_margin,
-        switch_cost_seconds=cfg.switch_cost_seconds, decision_horizon_seconds=cfg.decision_horizon_seconds,
+        switch_cost_seconds=measured[0] if measured else cfg.switch_cost_seconds,
+        decision_horizon_seconds=cfg.decision_horizon_seconds,
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
     return decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)

@@ -86,6 +86,14 @@ function renderServing(shares) {
   }).join("");
 }
 
+function switchCost(c) {
+  if (!c) return "";
+  const measured = c.measured_seconds !== null && c.measured_seconds !== undefined;
+  return " · switch cost: " + (measured
+    ? "measured " + c.measured_seconds + " s over " + c.measured_sessions + " sessions"
+    : "configured " + c.configured_seconds + " s (" + c.measured_sessions + " measured sessions, need 3)");
+}
+
 function renderModels(r) {
   const modelRows = r.models.length ? r.models.map(function (m) {
     return TR + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + m.routable_providers + TD +
@@ -98,7 +106,7 @@ function renderModels(r) {
   const held = r.trust_level && r.trust_level !== "hardware" ? " · no public traffic until hardware trust returns" : "";
   const trust = "trust: " + esc(r.trust_level || "unknown") + (r.trust_reason ? " (" + esc(r.trust_reason) + ")" : "") + held;
   const probeNote = "routable = coordinator self-route view for our own requests, account-wide (probed " + fmtAge(r.self_route_as_of) + ")";
-  return '<section><h2>Models: advertised / warm / routable</h2><div class="sub">' + trust + '<br>' + esc(session) + '<br>' + esc(probeNote) + '</div>' +
+  return '<section><h2>Models: advertised / warm / routable</h2><div class="sub">' + trust + switchCost(r.switch_cost) + '<br>' + esc(session) + '<br>' + esc(probeNote) + '</div>' +
     '<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>routable providers</th><th>last served</th></tr></thead><tbody>' + modelRows + '</tbody></table></section>';
 }
 
@@ -127,7 +135,7 @@ function renderHost(s, index) {
   const badge = '<span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span>';
   const subtitle = badge + " · daemon " + fmtAge(s.as_of) +
     (s.daemon_fresh ? "" : " (stale)") + " · " + activityLabel(s.inference_active);
-  const r = s.routability || { models: [], session: null, self_route_as_of: null, last_served_at: null };
+  const r = s.routability || { models: [], session: null, self_route_as_of: null, last_served_at: null, switch_cost: null };
   const options = WINDOWS.map(function (w) {
     return '<option value="' + w + '"' + (w === servingWindow ? " selected" : "") + ">" + w + "</option>";
   }).join("");

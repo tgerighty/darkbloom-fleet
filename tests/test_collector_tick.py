@@ -72,8 +72,32 @@ def test_a_failed_probe_is_logged_not_stored(monkeypatch, caplog):
 def test_decide_anchors_dwell_on_the_daemon_start(monkeypatch):
     anchors = []
     monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: anchors.append(started) or started)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: None)
     result = collector._decide(_cfg(), None, {"a": 1.0, "b": 1.05}, DAEMON, 10_000.0)
     assert result.action == "KEEP" and anchors == [100.0]
+
+
+def _capture_guardrails(monkeypatch):
+    seen = []
+    monkeypatch.setattr(collector.decision_mod, "decide",
+                        lambda *args: seen.append(args[-1]) or Decision("a", "r", "KEEP"))
+    return seen
+
+
+def test_decide_swaps_the_measured_switch_cost_in(monkeypatch):
+    monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: started)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: (312.0, 7))
+    seen = _capture_guardrails(monkeypatch)
+    collector._decide(_cfg(), None, {"a": 1.0}, DAEMON, 10_000.0)
+    assert seen[0].switch_cost_seconds == 312.0
+
+
+def test_decide_falls_back_to_the_configured_switch_cost(monkeypatch):
+    monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: started)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: None)
+    seen = _capture_guardrails(monkeypatch)
+    collector._decide(_cfg(switch_cost_seconds=240.0), None, {"a": 1.0}, DAEMON, 10_000.0)
+    assert seen[0].switch_cost_seconds == 240.0
 
 
 @pytest.mark.parametrize("daemon", [None, DaemonState("a", ("a",), False, 1, 100.0, False)])
