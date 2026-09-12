@@ -12,8 +12,12 @@
 - [NOW] [FEATURE] [IN-PROGRESS] PR #2: self-route routability probe, per-host
   models panel (advertised / warm / routable / last served), single demand
   table, serving windows with idle, scrolling decisions, 1-minute refresh
-- [NEXT] [FEATURE] pg_back backup registration
-- [NEXT] [REFACTOR] Retire the cm7 docker compose copy
+- ~~[NEXT] [FEATURE] pg_back backup registration~~ (2026-09-12: cluster repo
+  11709e1 — `darkbloom-fleet-postgres` target at the 6h tier reusing
+  infra_age_recipient; verifier inventory line; first encrypted dump OK)
+- ~~[NEXT] [REFACTOR] Retire the cm7 docker compose copy~~ (2026-09-12:
+  containers and network removed, `darkbloom-fleet_fleet_pgdata` volume kept;
+  `docker-compose.yml` stays for local runs)
 - [NEXT] [BUG] CodeRabbit 2026-09-12, pre-existing logic, deferred from PR #2:
   empty demand scores must not refresh/save the EMA (tick should WAIT);
   the restart-retry backoff should not be recorded as a decision error, or it
