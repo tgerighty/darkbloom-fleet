@@ -89,8 +89,8 @@ def test_fetch_daemon_state_reads_advertised_models_and_the_request_counter(monk
 
 
 def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
-    commands = _capture(monkeypatch, '[[8, "a", null, 30, 1.5]]')
-    assert remote.fetch_new_payouts(_cfg(False), since_rowid=7) == [Payout(8, "a", 0, 30, 1.5)]
+    commands = _capture(monkeypatch, '[[8, "a", null, 30, 1.5, "session-1"]]')
+    assert remote.fetch_new_payouts(_cfg(False), since_rowid=7) == [Payout(8, "a", 0, 30, 1.5, "session-1")]
     assert "(7,)" in commands[0]
 
 

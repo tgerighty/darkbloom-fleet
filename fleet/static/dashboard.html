@@ -111,12 +111,14 @@ function renderDecisions(decisions) {
     '<tbody>' + rows + '</tbody></table></div></section>';
 }
 
-function renderEarnings(rows) {
+function renderEarnings(rows, unattributed) {
   const body = rows.length ? rows.map(function (e) {
     return TR + fmtAge(e.created_at) + TD + esc(e.model) + TD + e.completion_tokens + TD +
       "$" + num(e.micro_usd / 1e6, 4) + TR_END;
   }).join("") : "<tr><td colspan=4><i>no payouts recorded yet</i></td></tr>";
-  return '<section><h2>Recent payouts</h2><div class="sub">from this host&#39;s ledger, which is account-wide</div>' +
+  const note = "payouts are attributed to this host by provider session<br>" + unattributed +
+    " of the last 50 ledger rows are attributed to no host yet";
+  return '<section><h2>Recent payouts</h2><div class="sub">' + note + '</div>' +
     '<div class="scroll tall"><table><thead><tr><th>when</th><th>model</th><th>completion tokens</th><th>paid</th></tr></thead>' +
     '<tbody>' + body + '</tbody></table></div></section>';
 }
@@ -144,7 +146,7 @@ function renderHost(s, index) {
       '<div class="sub">share of the window actively serving a request, per model; idle = warm with no request, no model, or no data (1-minute samples)</div>' +
       '<div>' + renderServing((s.serving || {})[servingWindow]) + '</div></section>' +
     renderDecisions(s.recent_decisions) +
-    renderEarnings(s.recent_earnings || []) +
+    renderEarnings(s.recent_earnings || [], s.unattributed_recent || 0) +
   '</div>';
 }
 

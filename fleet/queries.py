@@ -8,6 +8,7 @@ from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
 
+from .attribution import provider_hosts, unattributed_recent
 from .config import Config
 from .routability import routability_panel
 
@@ -39,11 +40,15 @@ def latest_daemon(pool: ConnectionPool, host: str) -> Row | None:
         ).fetchone()
 
 
-def earnings_usd(pool: ConnectionPool, host: str, since: float) -> float:
+def earnings_usd(pool: ConnectionPool, host: str, since: float, hashes: list[str]) -> float:
+    """Only payouts whose provider session is attributed to this host; the
+    ledger is account-wide, so the host column alone would count the other
+    machines' money too (see attribution.py)."""
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT coalesce(sum(micro_usd), 0) AS total FROM earnings WHERE host = %s AND created_at > %s",
-            (host, since),
+            "SELECT coalesce(sum(micro_usd), 0) AS total FROM earnings "
+            "WHERE host = %s AND created_at > %s AND provider_hash = ANY(%s)",
+            (host, since, hashes),
         ).fetchone()
     return float(row["total"]) / 1_000_000
 
@@ -57,14 +62,14 @@ def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[R
         ).fetchall()
 
 
-def recent_earnings(pool: ConnectionPool, host: str, limit: int = 50) -> list[Row]:
-    """Latest payouts read from this host's ledger. The ledger is
-    account-wide, so rows are not attributable to this host (see progress.md)."""
+def recent_earnings(pool: ConnectionPool, host: str, hashes: list[str], limit: int = 50) -> list[Row]:
+    """Latest payouts attributed to this host by provider session (the ledger
+    copy itself is account-wide — see attribution.py)."""
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT created_at, model, completion_tokens, micro_usd "
-            "FROM earnings WHERE host = %s ORDER BY created_at DESC LIMIT %s",
-            (host, limit),
+            "SELECT created_at, model, completion_tokens, micro_usd FROM earnings "
+            "WHERE host = %s AND provider_hash = ANY(%s) ORDER BY created_at DESC LIMIT %s",
+            (host, hashes, limit),
         ).fetchall()
 
 
@@ -121,6 +126,9 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
     host = cfg.host_label
     daemon = latest_daemon(pool, host)
     now = time.time()
+    demand = latest_demand_table(pool, host)
+    attributed = provider_hosts(pool)
+    hashes = [h for h, owner in attributed.items() if owner == host]
     return {
         "host": {"label": cfg.host_label, "spec": cfg.host_spec},
         "mode": "LIVE" if cfg.live_execution else "OBSERVE",
@@ -128,11 +136,12 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "daemon_fresh": daemon["fresh"] if daemon else False,
         "inference_active": daemon["inference_active"] if daemon else None,
         "as_of": daemon["observed_at"] if daemon else None,
-        "demand": latest_demand_table(pool, host),
-        "earnings_usd_24h": round(earnings_usd(pool, host, now - DAY_SECONDS), 4),
-        "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600), 4),
+        "demand": demand,
+        "earnings_usd_24h": round(earnings_usd(pool, host, now - DAY_SECONDS, hashes), 4),
+        "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600, hashes), 4),
         "serving": {name: serving_percentage(pool, host, seconds) for name, seconds in SERVING_WINDOWS.items()},
         "recent_decisions": recent_decisions(pool, host, limit=50),
-        "recent_earnings": recent_earnings(pool, host),
+        "recent_earnings": recent_earnings(pool, host, hashes),
+        "unattributed_recent": unattributed_recent(pool, host, attributed),
         "routability": routability_panel(pool, host, daemon),
     }

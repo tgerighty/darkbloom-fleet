@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS earnings (
     PRIMARY KEY (host, payout_rowid)
 );
 CREATE INDEX IF NOT EXISTS earnings_host_time ON earnings (host, created_at DESC);
+ALTER TABLE earnings ADD COLUMN IF NOT EXISTS provider_hash TEXT;
 
 CREATE TABLE IF NOT EXISTS ema_state (
     host TEXT NOT NULL,
@@ -140,11 +141,13 @@ def insert_self_route_samples(pool: ConnectionPool, observed_at: float, counts: 
 def insert_payouts(pool: ConnectionPool, host: str, payouts: list[Payout], now: float) -> None:
     if not payouts:
         return
-    rows = [(host, p.rowid, p.model, p.completion_tokens, p.micro_usd, p.created_at, now) for p in payouts]
+    rows = [(host, p.rowid, p.model, p.completion_tokens, p.micro_usd, p.created_at, p.provider_hash, now)
+            for p in payouts]
     with pool.connection() as conn:
         conn.cursor().executemany(
-            "INSERT INTO earnings (host, payout_rowid, model, completion_tokens, micro_usd, created_at, ingested_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (host, payout_rowid) DO NOTHING",
+            "INSERT INTO earnings (host, payout_rowid, model, completion_tokens, micro_usd, created_at, "
+            "provider_hash, ingested_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (host, payout_rowid) DO NOTHING",
             rows,
         )
 

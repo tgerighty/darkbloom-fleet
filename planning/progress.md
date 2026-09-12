@@ -26,8 +26,11 @@
 - [NEXT] [FEATURE] Measured switch penalty: feed the routability probe's
   first-request timings back into the switch-cost guardrail instead of the
   fixed 300 s.
-- [NEXT] [BUG] The payout ledger is account-wide on every Mac, so per-host
+- ~~[NEXT] [BUG] The payout ledger is account-wide on every Mac, so per-host
   earnings count other machines' payouts. Attribute payouts to a host by
-  matching each provider_hash session to that host's daemon restarts.
+  matching each provider_hash session to that host's daemon restarts.~~
+  (2026-09-12: provider_hash ingested; each session attributed to the host
+  whose request counter rose across the payout's snapshot minute —
+  fleet/attribution.py; dashboard shows the unattributed row count)
 - [FUTURE] [FEATURE] Write the remote watcher's asynchronous switch result
   back onto its decision record (only matters once live mode is enabled)

@@ -28,7 +28,7 @@ import json, sqlite3
 from pathlib import Path
 db = sqlite3.connect((Path.home() / {db_path!r}).expanduser().as_uri() + "?mode=ro", uri=True)
 rows = db.execute(
-    "SELECT rowid, model, completion_tokens, micro_usd, created_at FROM payouts "
+    "SELECT rowid, model, completion_tokens, micro_usd, created_at, provider_hash FROM payouts "
     "WHERE rowid > ? AND model != 'base_reward' ORDER BY rowid", ({since_rowid},)
 ).fetchall()
 print(json.dumps(rows))
@@ -92,7 +92,8 @@ def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
     remote_command = f"{shlex.quote(cfg.remote_python)} - <<'PY'\n{script}\nPY"
     raw = _run_ssh(cfg, remote_command, timeout=20)
     rows = json.loads(raw)
-    return [Payout(rowid=r[0], model=r[1], completion_tokens=r[2] or 0, micro_usd=r[3] or 0, created_at=r[4]) for r in rows]
+    return [Payout(rowid=r[0], model=r[1], completion_tokens=r[2] or 0, micro_usd=r[3] or 0,
+                   created_at=r[4], provider_hash=r[5]) for r in rows]
 
 
 def execute_switch(cfg: Config, target_model: str) -> None:

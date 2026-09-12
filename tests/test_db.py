@@ -26,11 +26,11 @@ def test_bulk_inserts_skip_empty_input(fake_pool):
 def test_bulk_inserts_write_one_row_per_item(fake_pool):
     pool = fake_pool()
     db.insert_demand_samples(pool, "h", 1.0, {"m": CapacitySample("m", 2, 1, 2.0)}, {"m": 0.5}, {"m": 0.1}, {"m": 0.4})
-    db.insert_payouts(pool, "h", [Payout(7, "m", 10, 25, 3.0)], 4.0)
+    db.insert_payouts(pool, "h", [Payout(7, "m", 10, 25, 3.0, "session-1")], 4.0)
     db.save_ema(pool, "h", {"m": 0.4}, 5.0)
     assert [rows for _sql, rows in pool.calls] == [
         [("h", 1.0, "m", 2, 1, 2.0, 0.1, 0.5, 0.4)],
-        [("h", 7, "m", 10, 25, 3.0, 4.0)],
+        [("h", 7, "m", 10, 25, 3.0, "session-1", 4.0)],
         [("h", "m", 0.4, 5.0)],
     ]
 
