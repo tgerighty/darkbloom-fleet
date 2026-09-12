@@ -26,9 +26,21 @@ def test_decide_waits_when_nothing_is_scored_yet():
 
 
 def test_decide_switches_to_the_only_scored_model_when_current_is_unscored():
-    result = decide({"a": 1.0}, current_model=None, last_switch_at=0, now=1000,
+    result = decide({"a": 1.0}, current_model=None, last_switch_at=0, now=10_000,
                     inference_active=False, guardrails=GUARDRAILS)
     assert result.target == "a" and result.action == "SWITCH"
+
+
+def test_decide_blocks_on_minimum_dwell_when_current_is_unscored():
+    result = decide({"a": 1.0}, current_model=None, last_switch_at=9_900, now=10_000,
+                    inference_active=False, guardrails=GUARDRAILS)
+    assert result.target is None and result.action == "KEEP" and "dwell" in result.reason
+
+
+def test_decide_waits_for_idle_when_current_is_unscored_and_the_provider_is_busy():
+    result = decide({"a": 1.0}, current_model=None, last_switch_at=0, now=10_000,
+                    inference_active=True, guardrails=GUARDRAILS)
+    assert result.target == "a" and result.action == "SWITCH_WHEN_IDLE" and "idle" in result.reason
 
 
 def test_decide_keeps_current_when_it_ranks_first_after_switch_cost():

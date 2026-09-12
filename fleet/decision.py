@@ -45,6 +45,11 @@ def decide(
         return Decision(current_model, "no scored models yet", "WAIT")
     if current_model not in ema:
         best = max(ema, key=ema.get)
+        if now - last_switch_at < guardrails.min_dwell_seconds:
+            remaining = guardrails.min_dwell_seconds - (now - last_switch_at)
+            return Decision(current_model, f"no eligible current model; minimum dwell has {remaining:.0f}s left", "KEEP")
+        if inference_active:
+            return Decision(best, f"no eligible current model; highest smoothed score {ema[best]:.3f}; waiting for idle", "SWITCH_WHEN_IDLE")
         return Decision(best, f"no eligible current model; highest smoothed score {ema[best]:.3f}", "SWITCH")
 
     horizon = guardrails.decision_horizon_seconds

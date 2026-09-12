@@ -101,6 +101,12 @@ def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
     assert commands == ["darkbloom start --model gpt-oss-20b --idle-timeout 0", f"rm -f {remote.FAST_SWITCH_STATE_PATH}"]
 
 
+def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):
+    commands = _capture(monkeypatch)
+    remote.remove_fast_switch_target(_cfg(live_execution=False))
+    assert commands == [f"rm -f {remote.FAST_SWITCH_STATE_PATH}"]
+
+
 def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monkeypatch):
     commands = _capture(monkeypatch)
     remote.launch_fast_switch_watcher(_cfg(live_execution=True), "a", max_seconds=55.0)

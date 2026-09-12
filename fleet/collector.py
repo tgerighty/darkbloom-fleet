@@ -81,12 +81,11 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
 
 
 def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: float) -> tuple[bool, str | None]:
-    """Live mode only. Returns (executed, error)."""
+    """Live mode only. Returns (executed, error). The restart-retry backoff is
+    applied by the caller before storing the decision, so a deferred switch
+    never reaches here as a SWITCH."""
     if decision.action != "SWITCH" or not cfg.live_execution:
         return False, None
-    host = cfg.host_label
-    if now - db.last_failed_switch_at(pool, host) < cfg.restart_backoff_seconds:
-        return False, "restart-retry backoff: waiting after a recent failed attempt"
     fresh_daemon = _fetch_daemon(cfg, time.time())
     if not fresh_daemon or not fresh_daemon.fresh or fresh_daemon.inference_active:
         return False, "aborted: provider is not confirmed fresh and idle immediately before the switch"
@@ -105,12 +104,15 @@ def _maybe_launch_fast_poll(cfg: Config, decision: Decision) -> None:
     so launch the self-locking 1s-poll watcher on the remote host instead;
     it re-checks the live recommendation every second and switches the
     instant a gap opens. Any other decision clears the watcher's target, so a
-    watcher still running from an earlier tick cannot act on a stale one."""
-    if not cfg.live_execution:
-        if decision.action == "SWITCH_WHEN_IDLE":
-            log.info("observe mode: would launch fast-poll watcher for target %s", decision.target)
-        return
+    watcher still running from an earlier tick cannot act on a stale one.
+    Observe mode never launches or executes anything, but still clears a
+    target left behind by an earlier live tick."""
     try:
+        if not cfg.live_execution:
+            if decision.action == "SWITCH_WHEN_IDLE":
+                log.info("observe mode: would launch fast-poll watcher for target %s", decision.target)
+            remote.remove_fast_switch_target(cfg)
+            return
         if decision.action == "SWITCH_WHEN_IDLE":
             remote.launch_fast_switch_watcher(cfg, decision.target, max_seconds=max(5.0, cfg.poll_interval_seconds - 5))
         else:
@@ -127,9 +129,17 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     if daemon is not None:
         db.insert_daemon_snapshot(pool, host, now, daemon)
     _probe_self_route(cfg, pool, now)
+    _ingest_earnings(cfg, pool, now)
 
     samples, prices = _fetch_scores(cfg)
     scores = scoring.compute_scores(samples, prices, cfg.weights)
+    if not scores:
+        # No scored models this tick: leave the stored EMA and its timestamp
+        # untouched (saving now would fake a fresh dt on the next real update)
+        # and wait rather than score stale data.
+        result = Decision(None, "demand feeds unavailable", "WAIT")
+        _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
+        return
 
     ema_prev, last_updated = db.load_ema(pool, host)
     dt = max(1.0, now - last_updated) if last_updated else cfg.poll_interval_seconds
@@ -138,16 +148,20 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
         db.save_ema(pool, host, ema, now)
     db.insert_demand_samples(pool, host, now, samples, scores, prices, ema)
 
-    _ingest_earnings(cfg, pool, now)
-
     result = _decide(cfg, pool, ema, daemon, now)
     _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
 
 
 def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current_model: str | None, now: float) -> None:
     """The decision is stored before any switch is dispatched, so a crash
-    mid-switch still leaves a record; the outcome is written back afterwards."""
+    mid-switch still leaves a record; the outcome is written back afterwards.
+    The restart-retry backoff defers rather than fails: error must stay NULL,
+    or last_failed_switch_at() would move forward every tick and the backoff
+    would never end."""
     mode = "live" if cfg.live_execution else "observe"
+    if (result.action == "SWITCH" and cfg.live_execution
+            and now - db.last_failed_switch_at(pool, cfg.host_label) < cfg.restart_backoff_seconds):
+        result = Decision(result.target, f"{result.reason}; restart-retry backoff: waiting after a recent failed attempt", "BLOCKED")
     decision_id = db.insert_decision(pool, cfg.host_label, now, current_model, result, Outcome(mode, False, None))
     executed, error = _maybe_execute(cfg, pool, result, now)
     if executed or error:
