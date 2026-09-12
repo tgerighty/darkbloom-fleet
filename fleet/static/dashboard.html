@@ -65,6 +65,18 @@ function renderHost(s) {
       '<div>' + pct + '%</div></div>';
   }).join("") : "<i>not enough history yet</i>";
 
+  const r = s.routability || { models: [], session: null, self_route_as_of: null };
+  const modelRows = r.models.length ? r.models.map(function (m) {
+    return "<tr><td>" + esc(m.model) + "</td><td>" + (m.advertised ? "yes" : "–") + "</td><td>" +
+      (m.warm ? "yes" : "–") + "</td><td>" + m.routable_providers + "</td></tr>";
+  }).join("") : "<tr><td colspan=4><i>no probe data yet</i></td></tr>";
+  const mins = function (v) { return v === null || v === undefined ? "not yet" : v + " min"; };
+  const session = r.session
+    ? "daemon restarted " + fmtAge(r.session.started_at) + " · first request after " + mins(r.session.first_request_after_min) +
+      " · any host routable after " + mins(r.session.any_host_routable_after_min)
+    : "no session data";
+  const probeNote = "routable = coordinator self-route view, account-wide (probed " + fmtAge(r.self_route_as_of) + ")";
+
   const decisionRows = s.recent_decisions.map(function (d) {
     return "<tr><td>" + fmtAge(d.observed_at) + "</td><td>" + esc(d.current_model || "–") + "</td><td>" +
       esc(d.target_model || "–") + "</td><td>" + esc(d.action) + (d.executed ? " ✓" : "") +
@@ -79,6 +91,8 @@ function renderHost(s) {
       '<div class="kpi"><div class="value">$' + num(s.earnings_usd_24h, 2) + '</div><div class="label">$ earned / 24h</div></div>' +
       '<div class="kpi"><div class="value">$' + num(s.earnings_usd_1h, 4) + '</div><div class="label">$ earned / 1h</div></div>' +
     '</div>' +
+    '<section><h2>Models: advertised / warm / routable</h2><div class="sub">' + esc(session) + '<br>' + esc(probeNote) + '</div>' +
+      '<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>routable providers</th></tr></thead><tbody>' + modelRows + '</tbody></table></section>' +
     '<section><h2>Live demand</h2><table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead><tbody>' + demandRows + '</tbody></table></section>' +
     '<section><h2>Serving percentage (24h)</h2><div>' + servingBars + '</div></section>' +
     '<section><h2>Recent decisions</h2><table><thead><tr><th>when</th><th>current</th><th>target</th><th>action</th><th>reason</th></tr></thead><tbody>' + decisionRows + '</tbody></table></section>' +

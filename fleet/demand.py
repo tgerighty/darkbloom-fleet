@@ -14,10 +14,28 @@ USER_AGENT = "darkbloom-fleet/0.1"
 Json = dict[str, object] | list[object]
 
 
-def _get_json(url: str) -> Json:
-    request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
+def _get_json(url: str, headers: dict[str, str] | None = None) -> Json:
+    request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT, **(headers or {})})
     with urlopen(request, timeout=20) as response:
         return json.load(response)
+
+
+def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
+    """Models the coordinator will route to on OUR machines right now, with how
+    many of our providers it counts as routable for each. The self-route view
+    lists what is advertised and passes the routing gates, not what is warm,
+    so an empty result means every owned machine is in the post-restart
+    penalty box (darkbloom-manager/analysis/switch-penalty)."""
+    headers = {"Authorization": f"Bearer {api_key}", "X-Darkbloom-Route": "self"}
+    payload = _get_json(f"{base_url.rstrip('/')}/v1/models", headers)
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    counts: dict[str, int] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, dict) and row.get("id"):
+            meta = row.get("metadata")
+            routable = meta.get("routable_providers") if isinstance(meta, dict) else 0
+            counts[str(row["id"])] = int(routable or 0)
+    return counts
 
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:

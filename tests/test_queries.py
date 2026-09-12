@@ -49,18 +49,19 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_990.0}
     pool = fake_pool([daemon], [{"model": "a", "ema_score": 0.2}], [{"total": 2_500_000}], [{"total": 500_000}],
-                     [], [_snap(9_900.0, "a")], [{"action": "KEEP"}])
+                     [], [_snap(9_900.0, "a")], [{"action": "KEEP"}], [{"t": None}])
     status = queries.build_status(SimpleNamespace(host_label="m3", host_spec="M3 Max", live_execution=False), pool)
     assert status["host"] == {"label": "m3", "spec": "M3 Max"} and status["mode"] == "OBSERVE"
     assert status["current_model"] == "a" and status["daemon_fresh"] is True
     assert status["earnings_usd_24h"] == 2.5 and status["earnings_usd_1h"] == 0.5
     assert status["serving_percentage_24h"] == {"a": 100.0}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
+    assert status["routability"] == {"self_route_as_of": None, "models": [], "session": None}
 
 
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
-    pool = fake_pool([], [], [{"total": 0}], [{"total": 0}], [], [], [])
+    pool = fake_pool([], [], [{"total": 0}], [{"total": 0}], [], [], [], [{"t": None}])
     status = queries.build_status(SimpleNamespace(host_label="m1", host_spec="?", live_execution=True), pool)
     assert status["current_model"] is None and status["mode"] == "LIVE"
     assert status["serving_percentage_24h"] == {} and status["demand"] == []

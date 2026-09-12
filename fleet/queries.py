@@ -9,6 +9,7 @@ from itertools import pairwise
 from psycopg_pool import ConnectionPool
 
 from .config import Config
+from .routability import routability_panel
 
 DAY_SECONDS = 86_400
 OUTAGE_GAP_SECONDS = 600
@@ -102,4 +103,5 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600), 4),
         "serving_percentage_24h": serving_percentage(pool, host, DAY_SECONDS),
         "recent_decisions": recent_decisions(pool, host),
+        "routability": routability_panel(pool, host, daemon),
     }

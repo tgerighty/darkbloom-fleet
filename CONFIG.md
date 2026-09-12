@@ -35,6 +35,7 @@ secrets once, on a manager:
 | `darkbloom_fleet_ssh_key` | Private key the Macs accept. |
 | `darkbloom_fleet_ssh_config` | One `Host` block per alias, plus `IdentityFile /run/secrets/darkbloom_fleet_ssh_key`, `UserKnownHostsFile /run/secrets/darkbloom_fleet_ssh_known_hosts` and `StrictHostKeyChecking yes`. |
 | `darkbloom_fleet_ssh_known_hosts` | Host keys for every alias. |
+| `darkbloom_fleet_api_key` | A Darkbloom consumer API key for the account that owns the Macs; used only for the read-only self-route listing (`DARKBLOOM_API_KEY_FILE`). |
 
 The dashboard is served at `https://darkbloom.nxio.ai` behind Cloudflare
 Access. It has no login of its own, so never publish it without Access.
@@ -67,6 +68,7 @@ Shared by every host:
 |---|---|---|
 | `DATABASE_PASSWORD_FILE` | unset | File holding the Postgres password (a Swarm secret), merged into `DATABASE_URL`. |
 | `DARKBLOOM_SSH_CONFIG` | unset | SSH config passed to every `ssh` call with `-F` (a Swarm secret on the cluster). |
+| `DARKBLOOM_API_KEY_FILE` | unset | File holding a Darkbloom consumer API key (a Swarm secret). When set, host 1's tick probes `GET /v1/models` with `X-Darkbloom-Route: self` once a minute and records which of our models the coordinator will route to. Empty results are recorded too: they are the post-restart penalty box. Unset disables the probe. |
 | `FLEET_BIND_HOST` | `127.0.0.1` | Address the dashboard binds to. Containers set `0.0.0.0` so Docker can reach it. |
 | `DARKBLOOM_BASE_URL` | `https://api.darkbloom.dev` | Public demand-capacity API base. |
 | `DARKBLOOM_PRICING_URL` | `https://api.darkbloom.dev/v1/pricing` | Public output-token pricing endpoint. |

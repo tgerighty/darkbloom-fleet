@@ -20,6 +20,8 @@ class DaemonState:
     pid: int
     started_at: float
     fresh: bool  # written_at within Config.daemon_freshness_seconds of "now"
+    advertised_models: tuple[str, ...] = ()  # offered to the coordinator; a superset of warm_models
+    requests_served: int = 0  # this daemon session's counter; resets on restart
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,23 @@ def test_get_json_sends_the_user_agent_and_parses_the_body(monkeypatch):
     assert seen == {"ua": demand.USER_AGENT, "timeout": 20}
 
 
+def test_fetch_self_route_sends_the_key_and_reads_routable_counts(monkeypatch):
+    seen = {}
+
+    def fake_get(url, headers=None):
+        seen.update(url=url, headers=headers)
+        return {"data": [{"id": "a", "metadata": {"routable_providers": 2}}, {"id": "b"}, "junk", {"metadata": {}}]}
+
+    monkeypatch.setattr(demand, "_get_json", fake_get)
+    assert demand.fetch_self_route("https://x/", "k") == {"a": 2, "b": 0}
+    assert seen == {"url": "https://x/v1/models", "headers": {"Authorization": "Bearer k", "X-Darkbloom-Route": "self"}}
+
+
+def test_a_self_route_payload_of_the_wrong_shape_yields_nothing(monkeypatch):
+    monkeypatch.setattr(demand, "_get_json", lambda url, headers=None: ["nope"])
+    assert demand.fetch_self_route("https://x", "k") == {}
+
+
 def test_fetch_capacity_reads_the_data_list(monkeypatch):
     payload = {"data": [{"id": "m", "active_requests": 4, "warm_providers": 2}, {"no_id": True}]}
     monkeypatch.setattr(demand, "_get_json", lambda url: payload)

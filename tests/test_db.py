@@ -41,9 +41,16 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     decision_id = db.insert_decision(pool, "h", 2.0, "m", Decision("n", "why", "SWITCH"), Outcome("live", False, None))
     db.record_outcome(pool, decision_id, Outcome("live", True, None))
     assert decision_id == 9
-    assert pool.calls[0][1] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5)
+    assert pool.calls[0][1] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0)
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None)
     assert pool.calls[2][1] == ("live", True, None, 9)
+
+
+def test_self_route_samples_record_an_empty_probe_too(fake_pool):
+    pool = fake_pool()
+    db.insert_self_route_samples(pool, 1.0, {"a": 2})
+    db.insert_self_route_samples(pool, 2.0, {})
+    assert [rows for _sql, rows in pool.calls] == [[(1.0, "a", 2)], [(2.0, "", 0)]]
 
 
 def test_reads_fall_back_to_zero_when_the_tables_are_empty(fake_pool):

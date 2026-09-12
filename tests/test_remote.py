@@ -78,6 +78,13 @@ def test_fetch_daemon_state_parses_and_judges_freshness(monkeypatch):
     assert remote.fetch_daemon_state(_cfg(False), now=2000.0).fresh is False
 
 
+def test_fetch_daemon_state_reads_advertised_models_and_the_request_counter(monkeypatch):
+    _capture(monkeypatch, '{"current_model": "a", "warm_models": ["a"], "advertised_models": ["a", "b"], '
+                          '"stats": {"requests_served": 7}, "written_at": 1000}')
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert state.advertised_models == ("a", "b") and state.requests_served == 7
+
+
 def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
     commands = _capture(monkeypatch, '[[8, "a", null, 30, 1.5]]')
     assert remote.fetch_new_payouts(_cfg(False), since_rowid=7) == [Payout(8, "a", 0, 30, 1.5)]

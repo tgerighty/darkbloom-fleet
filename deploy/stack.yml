@@ -57,6 +57,8 @@ services:
       DATABASE_URL: postgresql://darkbloom_fleet@postgres:5432/darkbloom_fleet
       DATABASE_PASSWORD_FILE: /run/secrets/darkbloom_fleet_db_password
       DARKBLOOM_SSH_CONFIG: /run/secrets/darkbloom_fleet_ssh_config
+      # Consumer key for the self-route routability probe (read-only listing).
+      DARKBLOOM_API_KEY_FILE: /run/secrets/darkbloom_fleet_api_key
       DARKBLOOM_HOST_1_SSH_TARGET: m3-48-1
       DARKBLOOM_HOST_1_LABEL: m3-48-1
       DARKBLOOM_HOST_1_SPEC: Apple M3 Max, 48GB RAM, 40 GPU cores
@@ -73,6 +75,10 @@ services:
     # mode 256 = 0400, owned by the image's appuser: ssh refuses a readable key.
     secrets:
       - source: darkbloom_fleet_db_password
+        uid: "1000"
+        gid: "1000"
+        mode: 256
+      - source: darkbloom_fleet_api_key
         uid: "1000"
         gid: "1000"
         mode: 256
@@ -144,4 +150,6 @@ secrets:
   darkbloom_fleet_ssh_config:
     external: true
   darkbloom_fleet_ssh_known_hosts:
+    external: true
+  darkbloom_fleet_api_key:
     external: true

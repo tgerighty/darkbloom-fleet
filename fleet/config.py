@@ -67,6 +67,13 @@ class Config:
     pricing_url: str
     dashboard_port: int
     ssh_config_path: str | None = None
+    api_key: str | None = None  # consumer key for the self-route routability probe
+    probe_self_route: bool = False  # the probe is account-wide, so only one host runs it
+
+
+def _secret_file(name: str) -> str | None:
+    path = os.environ.get(name)
+    return (Path(path).read_text().strip() or None) if path else None
 
 
 def _database_url() -> str:
@@ -90,6 +97,7 @@ def load_configs() -> tuple[Config, ...]:
     shared = {
         "database_url": _database_url(),
         "ssh_config_path": os.environ.get("DARKBLOOM_SSH_CONFIG") or None,
+        "api_key": _secret_file("DARKBLOOM_API_KEY_FILE"),
         "poll_interval_seconds": _float_env("POLL_INTERVAL_SECONDS", 60.0, positive=True),
         "weights": dict(DEFAULT_WEIGHTS),
         "ema_tau_minutes": _float_env("FLEET_EMA_TAU_MINUTES", 20.0, positive=True),
@@ -123,6 +131,7 @@ def load_configs() -> tuple[Config, ...]:
             host_spec=os.environ.get(prefix + "SPEC", "unknown"),
             models=models,
             live_execution=_bool_env(prefix + "LIVE_EXECUTION", default_live),
+            probe_self_route=n == 1,
             **shared,
         ))
         n += 1

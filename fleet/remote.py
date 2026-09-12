@@ -64,6 +64,8 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         pid=int(payload.get("pid") or 0),
         started_at=float(payload.get("started_at") or 0),
         fresh=written_at > 0 and current_time - written_at <= cfg.daemon_freshness_seconds,
+        advertised_models=tuple(str(m) for m in (payload.get("advertised_models") or []) if m),
+        requests_served=int((payload.get("stats") or {}).get("requests_served") or 0),
     )
 
 

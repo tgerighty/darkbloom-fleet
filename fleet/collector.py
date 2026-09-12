@@ -52,6 +52,20 @@ def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
     db.insert_payouts(pool, host, payouts, now)
 
 
+def _probe_self_route(cfg: Config, pool: ConnectionPool, now: float) -> None:
+    """Once per tick, from one host only (the view is account-wide): what the
+    coordinator will route to on our machines. This is the penalty-box
+    detector, so a probe that finds nothing routable is recorded too."""
+    if not (cfg.probe_self_route and cfg.api_key):
+        return
+    try:
+        counts = demand.fetch_self_route(cfg.base_url, cfg.api_key)
+    except Exception as error:  # noqa: BLE001
+        log.warning("self-route probe unavailable: %s", error)
+        return
+    db.insert_self_route_samples(pool, now, counts)
+
+
 def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: DaemonState | None, now: float) -> Decision:
     """Without a fresh daemon read neither the current model nor idleness is
     known, so the only safe decision is to wait for the next tick."""
@@ -112,6 +126,7 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     daemon = _fetch_daemon(cfg, now)
     if daemon is not None:
         db.insert_daemon_snapshot(pool, host, now, daemon)
+    _probe_self_route(cfg, pool, now)
 
     samples, prices = _fetch_scores(cfg)
     scores = scoring.compute_scores(samples, prices, cfg.weights)

@@ -13,3 +13,4 @@ secrets:
   - darkbloom_fleet_ssh_key
   - darkbloom_fleet_ssh_config
   - darkbloom_fleet_ssh_known_hosts
+  - darkbloom_fleet_api_key
