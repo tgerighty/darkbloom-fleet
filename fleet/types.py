@@ -33,6 +33,7 @@ class Payout:
     completion_tokens: int
     micro_usd: int
     created_at: float
+    provider_hash: str | None = None  # provider session; identifies the serving host (see attribution.py)
 
 
 @dataclass(frozen=True)

@@ -27,25 +27,47 @@ def test_last_served_per_model(fake_pool):
     assert routability.last_served(pool, "h") == {"a": 500.0, "b": 900.0}
 
 
+def test_measured_switch_cost_is_the_median_over_serving_sessions(fake_pool):
+    assert routability.measured_switch_cost(fake_pool([{"median": 312.4, "n": 7}]), "h") == (312.4, 7)
+
+
+def test_measured_switch_cost_waits_for_three_serving_sessions(fake_pool):
+    assert routability.measured_switch_cost(fake_pool([{"median": 240.0, "n": 2}]), "h") is None
+
+
 def test_the_panel_merges_the_host_view_with_the_account_view(fake_pool):
-    pool = fake_pool([{"t": 100.0}], [{"model": "gemma-4-26b", "routable_providers": 1}],
-                     [{"model": "gpt-oss-20b", "t": 90.0}, {"model": "old-model", "t": 20.0}], [{"t": 130.0}], [{"t": None}])
+    pool = fake_pool([{"t": 100.0}],
+                     [{"model": "gemma-4-26b", "routable_providers": 1}, {"model": "gpt-oss-20b", "routable_providers": 3},
+                      {"model": "other-model", "routable_providers": 2}],
+                     [{"model": "gpt-oss-20b", "t": 90.0}, {"model": "old-model", "t": 20.0}],
+                     [{"median": 312.4, "n": 7}], [{"t": 130.0}], [{"t": None}])
     daemon = {"advertised_models": ["gpt-oss-20b", "gemma-4-26b-qat-4bit"], "warm_models": ["gpt-oss-20b", "z-warm-only"],
               "started_at": 70.0, "trust_level": "self_signed", "trust_reason": "awaiting MDM verification"}
-    panel = routability.routability_panel(pool, "h", daemon)
+    panel = routability.routability_panel(pool, "h", daemon, 300.0)
     assert panel["self_route_as_of"] == 100.0 and panel["last_served_at"] == 90.0
     assert (panel["trust_level"], panel["trust_reason"]) == ("self_signed", "awaiting MDM verification")
+    # The coordinator's short id (gemma-4-26b) folds into our advertised
+    # gemma-4-26b-qat-4bit row; an id matching nothing keeps its own row.
     assert panel["models"] == [
-        {"model": "gemma-4-26b", "advertised": False, "warm": False, "routable_providers": 1, "last_served_at": None},
-        {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 0, "last_served_at": None},
-        {"model": "gpt-oss-20b", "advertised": True, "warm": True, "routable_providers": 0, "last_served_at": 90.0},
+        {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 1, "last_served_at": None},
+        {"model": "gpt-oss-20b", "advertised": True, "warm": True, "routable_providers": 3, "last_served_at": 90.0},
         {"model": "old-model", "advertised": False, "warm": False, "routable_providers": 0, "last_served_at": 20.0},
+        {"model": "other-model", "advertised": False, "warm": False, "routable_providers": 2, "last_served_at": None},
         {"model": "z-warm-only", "advertised": False, "warm": True, "routable_providers": 0, "last_served_at": None},
     ]
     assert panel["session"] == {"started_at": 70.0, "any_host_routable_after_min": 1.0, "first_request_after_min": None}
+    assert panel["switch_cost"] == {"configured_seconds": 300.0, "measured_seconds": 312.4, "measured_sessions": 7}
 
 
 def test_the_panel_without_a_daemon_snapshot(fake_pool):
-    panel = routability.routability_panel(fake_pool([{"t": None}], []), "h", None)
+    panel = routability.routability_panel(fake_pool([{"t": None}], [], [{"median": None, "n": 0}]), "h", None, 300.0)
     assert panel == {"self_route_as_of": None, "trust_level": None, "trust_reason": None, "last_served_at": None,
-                     "models": [], "session": None}
+                     "models": [], "session": None,
+                     "switch_cost": {"configured_seconds": 300.0, "measured_seconds": None, "measured_sessions": 0}}
+
+
+def test_an_ambiguous_alias_keeps_the_coordinator_row():
+    from fleet.routability import _our_id
+    assert _our_id("gemma-4-26b", {"gemma-4-26b-8bit", "gemma-4-26b-qat-4bit"}) == "gemma-4-26b"
+    assert _our_id("gemma-4-26b", {"gemma-4-26b", "gemma-4-26b-qat-4bit"}) == "gemma-4-26b"
+    assert _our_id("gemma-4-26b", {"gemma-4-26b-qat-4bit", "gpt-oss-20b"}) == "gemma-4-26b-qat-4bit"

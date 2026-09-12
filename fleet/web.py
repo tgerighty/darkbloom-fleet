@@ -26,10 +26,12 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stop = asyncio.Event()
         tasks = [asyncio.create_task(run_forever(cfg, pool, stop)) for cfg in configs]
-        yield
-        stop.set()
-        # Let a tick already in its thread finish: main() closes the pool next.
-        await asyncio.gather(*tasks)
+        try:
+            yield
+        finally:
+            stop.set()
+            # Let a tick already in its thread finish: main() closes the pool next.
+            await asyncio.gather(*tasks)
 
     app = FastAPI(title="darkbloom-fleet", lifespan=lifespan)
 

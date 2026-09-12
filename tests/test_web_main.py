@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from fleet import main, web
 
 
@@ -36,6 +38,25 @@ def test_lifespan_runs_one_loop_per_host_and_waits_for_them_on_shutdown(monkeypa
 
     asyncio.run(scenario())
     assert sorted(finished) == ["a", "b"]
+
+
+def test_lifespan_stops_the_loops_even_when_the_app_shuts_down_via_an_exception(monkeypatch):
+    finished = []
+
+    async def fake_run_forever(cfg, pool, stop):
+        await stop.wait()
+        finished.append(cfg)
+
+    monkeypatch.setattr(web, "run_forever", fake_run_forever)
+    app = web.create_app(("a",), pool=None)
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="boom"):
+            async with app.router.lifespan_context(app):
+                raise RuntimeError("boom")
+
+    asyncio.run(scenario())
+    assert finished == ["a"]
 
 
 def _run_main(monkeypatch):

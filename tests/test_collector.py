@@ -10,7 +10,7 @@ from fleet.types import Decision
 
 
 def _cfg(live_execution: bool) -> SimpleNamespace:
-    return SimpleNamespace(live_execution=live_execution, poll_interval_seconds=60.0, host_label="h",
+    return SimpleNamespace(live_execution=live_execution, poll_interval_seconds=60.0, host_id="h",
                            restart_backoff_seconds=30.0)
 
 

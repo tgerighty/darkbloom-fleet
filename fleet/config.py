@@ -49,6 +49,7 @@ class Config:
     ssh_key_path: str | None
     remote_python: str
     host_label: str
+    host_id: str
     host_spec: str
     database_url: str
     poll_interval_seconds: float
@@ -86,10 +87,28 @@ def _database_url() -> str:
     return url
 
 
-def _require_unique_labels(configs: list[Config]) -> None:
-    labels = [c.host_label for c in configs]
-    if len(set(labels)) != len(labels):
-        raise RuntimeError(f"host labels are the database identity and must be unique: {labels}")
+def _require_unique(configs: list[Config], field: str, what: str) -> None:
+    values = [getattr(c, field) for c in configs]
+    if len(set(values)) != len(values):
+        raise RuntimeError(f"{what} must be unique: {values}")
+
+
+def _host_config(n: int, ssh_target: str, shared: dict[str, object]) -> Config:
+    prefix = f"DARKBLOOM_HOST_{n}_"
+    models_raw = os.environ.get(prefix + "MODELS")
+    models = tuple(m.strip() for m in models_raw.split(",") if m.strip()) if models_raw else DEFAULT_MODELS
+    return Config(
+        ssh_target=ssh_target,
+        ssh_key_path=os.environ.get(prefix + "SSH_KEY_PATH") or None,
+        remote_python=os.environ.get(prefix + "REMOTE_PYTHON", "python3"),
+        host_label=os.environ.get(prefix + "LABEL", ssh_target),
+        host_id=os.environ.get(prefix + "ID") or ssh_target,
+        host_spec=os.environ.get(prefix + "SPEC", "unknown"),
+        models=models,
+        live_execution=_bool_env(prefix + "LIVE_EXECUTION", _bool_env("FLEET_LIVE_EXECUTION", False)),
+        probe_self_route=n == 1,
+        **shared,
+    )
 
 
 def load_configs() -> tuple[Config, ...]:
@@ -112,33 +131,16 @@ def load_configs() -> tuple[Config, ...]:
         "pricing_url": os.environ.get("DARKBLOOM_PRICING_URL", "https://api.darkbloom.dev/v1/pricing"),
         "dashboard_port": int(os.environ.get("FLEET_DASHBOARD_PORT", "8080")),
     }
-    default_live = _bool_env("FLEET_LIVE_EXECUTION", False)
-
     configs: list[Config] = []
     n = 1
-    while True:
-        prefix = f"DARKBLOOM_HOST_{n}_"
-        ssh_target = os.environ.get(prefix + "SSH_TARGET")
-        if not ssh_target:
-            break
-        models_raw = os.environ.get(prefix + "MODELS")
-        models = tuple(m.strip() for m in models_raw.split(",") if m.strip()) if models_raw else DEFAULT_MODELS
-        configs.append(Config(
-            ssh_target=ssh_target,
-            ssh_key_path=os.environ.get(prefix + "SSH_KEY_PATH") or None,
-            remote_python=os.environ.get(prefix + "REMOTE_PYTHON", "python3"),
-            host_label=os.environ.get(prefix + "LABEL", ssh_target),
-            host_spec=os.environ.get(prefix + "SPEC", "unknown"),
-            models=models,
-            live_execution=_bool_env(prefix + "LIVE_EXECUTION", default_live),
-            probe_self_route=n == 1,
-            **shared,
-        ))
+    while ssh_target := os.environ.get(f"DARKBLOOM_HOST_{n}_SSH_TARGET"):
+        configs.append(_host_config(n, ssh_target, shared))
         n += 1
     if not configs:
         raise RuntimeError(
             "At least one host is required: set DARKBLOOM_HOST_1_SSH_TARGET "
             "(an SSH host/alias, e.g. from ~/.ssh/config), plus _LABEL/_SPEC/_MODELS as needed"
         )
-    _require_unique_labels(configs)
+    _require_unique(configs, "host_id", "host ids are the database identity and")
+    _require_unique(configs, "host_label", "host labels (display only)")
     return tuple(configs)

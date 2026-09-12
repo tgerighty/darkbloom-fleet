@@ -13,7 +13,7 @@ from fleet.types import DaemonState, Payout
 def _cfg(live_execution: bool) -> Config:
     return Config(
         ssh_target="host", ssh_key_path=None, remote_python="python3", host_label="host-1",
-        host_spec="unknown", database_url="postgres://x", poll_interval_seconds=60.0,
+        host_id="host-1", host_spec="unknown", database_url="postgres://x", poll_interval_seconds=60.0,
         models=("a", "b"), weights={}, ema_tau_minutes=20.0, relative_margin=0.25,
         absolute_margin=0.01, switch_cost_seconds=300.0, decision_horizon_seconds=3600.0,
         min_dwell_seconds=1800.0, daemon_freshness_seconds=90.0, restart_backoff_seconds=30.0,
@@ -89,8 +89,8 @@ def test_fetch_daemon_state_reads_advertised_models_and_the_request_counter(monk
 
 
 def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
-    commands = _capture(monkeypatch, '[[8, "a", null, 30, 1.5]]')
-    assert remote.fetch_new_payouts(_cfg(False), since_rowid=7) == [Payout(8, "a", 0, 30, 1.5)]
+    commands = _capture(monkeypatch, '[[8, "a", null, 30, 1.5, "session-1"]]')
+    assert remote.fetch_new_payouts(_cfg(False), since_rowid=7) == [Payout(8, "a", 0, 30, 1.5, "session-1")]
     assert "(7,)" in commands[0]
 
 

@@ -55,7 +55,8 @@ Per host. `<N>` is 1, 2, ... and discovery stops at the first missing
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DARKBLOOM_HOST_<N>_LABEL` | the SSH target | Display name on the dashboard and the `host` column in every table. |
+| `DARKBLOOM_HOST_<N>_ID` | the SSH target | Immutable database identity: the `host` column in every table. Changing it orphans that host's history, so set it once and never edit it — rename the host with `LABEL` instead. |
+| `DARKBLOOM_HOST_<N>_LABEL` | the SSH target | Display name on the dashboard only (logs and the `host` block of `/api/status`); never a database key. |
 | `DARKBLOOM_HOST_<N>_SPEC` | `unknown` | Display hardware spec, e.g. `Apple M3 Max`. |
 | `DARKBLOOM_HOST_<N>_MODELS` | `qwen3.5-35b-a3b,gemma-4-26b-qat-4bit,gpt-oss-20b` | Comma-separated models this Mac has downloaded and may be scored for (see "Deferred" below). |
 | `DARKBLOOM_HOST_<N>_SSH_KEY_PATH` | unset | Explicit identity file, if the SSH config does not select one. |
@@ -77,7 +78,7 @@ Shared by every host:
 | `FLEET_EMA_TAU_MINUTES` | `20` | EMA time constant for score smoothing. |
 | `FLEET_RELATIVE_MARGIN` | `0.25` | Challenger must clear `current * (1 + margin)`. |
 | `FLEET_ABSOLUTE_MARGIN` | `0.01` | Challenger must also clear `current + margin`. |
-| `FLEET_SWITCH_COST_SECONDS` | `300` | Estimated unavailable time charged against a challenger's score. |
+| `FLEET_SWITCH_COST_SECONDS` | `300` | Estimated unavailable time charged against a challenger's score. Fallback only: once the host has 3+ past daemon sessions that served a request, each tick uses the measured median start-to-first-request delay over the last 10 such sessions instead (`routability.measured_switch_cost`); the dashboard's models panel shows which value is in force. |
 | `FLEET_DECISION_HORIZON_SECONDS` | `3600` | Window the switch cost is amortized over. |
 | `FLEET_MIN_DWELL_SECONDS` | `1800` | Minimum time before another switch is even considered. |
 | `FLEET_DAEMON_FRESHNESS_SECONDS` | `90` | A daemon-state read older than this is treated as stale, not authoritative. |

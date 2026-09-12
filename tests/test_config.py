@@ -52,6 +52,21 @@ def test_duplicate_host_labels_are_rejected(base_env):
         config.load_configs()
 
 
+def test_host_ids_default_to_the_ssh_target_and_read_their_own_variable(base_env):
+    base_env.setenv("DARKBLOOM_HOST_1_ID", "mac-1")
+    base_env.setenv("DARKBLOOM_HOST_2_SSH_TARGET", "m1")
+    first, second = config.load_configs()
+    assert first.host_id == "mac-1" and second.host_id == "m1"
+
+
+def test_duplicate_host_ids_are_rejected(base_env):
+    base_env.setenv("DARKBLOOM_HOST_2_SSH_TARGET", "m1")
+    base_env.setenv("DARKBLOOM_HOST_1_ID", "mac")
+    base_env.setenv("DARKBLOOM_HOST_2_ID", "mac")
+    with pytest.raises(RuntimeError, match="host ids"):
+        config.load_configs()
+
+
 def test_database_url_is_required(base_env):
     base_env.delenv("DATABASE_URL")
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
