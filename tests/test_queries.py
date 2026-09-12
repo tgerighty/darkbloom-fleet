@@ -4,7 +4,7 @@ from fleet import queries
 from fleet.queries import _serving_shares
 
 
-def _snap(t: float, model: str | None, active: bool = True) -> dict:
+def _snap(t: float, model: str | None, *, active: bool = True) -> dict:
     return {"observed_at": t, "current_model": model, "inference_active": active}
 
 
@@ -66,7 +66,8 @@ def _status_responses(daemon, demand, decisions):
     earnings x2, four fixed windows (before + rows each), lifetime's first
     snapshot, decisions, earnings rows, self-route probe, last-served."""
     return [daemon, demand, [{"total": 2_500_000}], [{"total": 500_000}],
-            *([[], []] * 4), [{"t": None}], decisions, [{"model": "a", "micro_usd": 12}], [{"t": None}], []]
+            *([[], []] * 4), [{"t": None}], decisions,
+            [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}], [{"t": None}], []]
 
 
 def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
@@ -80,7 +81,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
-    assert status["recent_earnings"] == [{"model": "a", "micro_usd": 12}]
+    assert status["recent_earnings"] == [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}]
     assert status["routability"] == {"self_route_as_of": None, "trust_level": None, "trust_reason": None,
                                      "last_served_at": None, "models": [], "session": None}
 
