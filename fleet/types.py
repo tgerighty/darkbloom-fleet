@@ -22,6 +22,8 @@ class DaemonState:
     fresh: bool  # written_at within Config.daemon_freshness_seconds of "now"
     advertised_models: tuple[str, ...] = ()  # offered to the coordinator; a superset of warm_models
     requests_served: int = 0  # this daemon session's counter; resets on restart
+    trust_level: str | None = None  # coordinator-granted: hardware | self_signed | ...; only "hardware" is routable
+    trust_reason: str | None = None  # e.g. "continuity", "awaiting MDM verification"
 
 
 @dataclass(frozen=True)

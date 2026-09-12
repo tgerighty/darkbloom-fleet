@@ -75,7 +75,8 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
-    assert status["routability"] == {"self_route_as_of": None, "last_served_at": None, "models": [], "session": None}
+    assert status["routability"] == {"self_route_as_of": None, "trust_level": None, "trust_reason": None,
+                                     "last_served_at": None, "models": [], "session": None}
 
 
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):

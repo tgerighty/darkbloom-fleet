@@ -41,7 +41,7 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     decision_id = db.insert_decision(pool, "h", 2.0, "m", Decision("n", "why", "SWITCH"), Outcome("live", False, None))
     db.record_outcome(pool, decision_id, Outcome("live", True, None))
     assert decision_id == 9
-    assert pool.calls[0][1] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0)
+    assert pool.calls[0][1] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0, None, None)
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None)
     assert pool.calls[2][1] == ("live", True, None, 9)
 

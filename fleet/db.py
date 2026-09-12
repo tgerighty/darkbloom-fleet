@@ -40,6 +40,8 @@ CREATE INDEX IF NOT EXISTS daemon_snapshots_host_time
     ON daemon_snapshots (host, observed_at DESC);
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS advertised_models TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS requests_served BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS trust_level TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS trust_reason TEXT;
 
 -- One row per model the coordinator will route to on our machines, per probe.
 -- A probe that found nothing routable writes one row with model = '' so the
@@ -119,11 +121,11 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO daemon_snapshots (host, observed_at, current_model, warm_models, "
-            "inference_active, fresh, pid, started_at, advertised_models, requests_served) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "inference_active, fresh, pid, started_at, advertised_models, requests_served, "
+            "trust_level, trust_reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
              daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
-             list(daemon.advertised_models), daemon.requests_served),
+             list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason),
         )
 
 

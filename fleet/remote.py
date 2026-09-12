@@ -65,7 +65,13 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         fresh=written_at > 0 and 0 <= current_time - written_at <= cfg.daemon_freshness_seconds,
         advertised_models=_model_ids(payload, "advertised_models"),
         requests_served=int((payload.get("stats") or {}).get("requests_served") or 0),
+        trust_level=_text((payload.get("trust") or {}).get("trust_level")),
+        trust_reason=_text((payload.get("trust") or {}).get("reason")),
     )
+
+
+def _text(value: object) -> str | None:
+    return str(value) if value else None
 
 
 def _model_ids(payload: dict[str, object], key: str) -> tuple[str, ...]:

@@ -31,9 +31,10 @@ def test_the_panel_merges_the_host_view_with_the_account_view(fake_pool):
     pool = fake_pool([{"t": 100.0}], [{"model": "gemma-4-26b", "routable_providers": 1}],
                      [{"model": "gpt-oss-20b", "t": 90.0}, {"model": "old-model", "t": 20.0}], [{"t": 130.0}], [{"t": None}])
     daemon = {"advertised_models": ["gpt-oss-20b", "gemma-4-26b-qat-4bit"], "warm_models": ["gpt-oss-20b", "z-warm-only"],
-              "started_at": 70.0}
+              "started_at": 70.0, "trust_level": "self_signed", "trust_reason": "awaiting MDM verification"}
     panel = routability.routability_panel(pool, "h", daemon)
     assert panel["self_route_as_of"] == 100.0 and panel["last_served_at"] == 90.0
+    assert (panel["trust_level"], panel["trust_reason"]) == ("self_signed", "awaiting MDM verification")
     assert panel["models"] == [
         {"model": "gemma-4-26b", "advertised": False, "warm": False, "routable_providers": 1, "last_served_at": None},
         {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 0, "last_served_at": None},
@@ -46,4 +47,5 @@ def test_the_panel_merges_the_host_view_with_the_account_view(fake_pool):
 
 def test_the_panel_without_a_daemon_snapshot(fake_pool):
     panel = routability.routability_panel(fake_pool([{"t": None}], []), "h", None)
-    assert panel == {"self_route_as_of": None, "last_served_at": None, "models": [], "session": None}
+    assert panel == {"self_route_as_of": None, "trust_level": None, "trust_reason": None, "last_served_at": None,
+                     "models": [], "session": None}

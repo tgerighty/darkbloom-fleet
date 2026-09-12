@@ -76,6 +76,11 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None) -> Ro
     started_at = float(daemon.get("started_at") or 0) if daemon else 0.0
     return {
         "self_route_as_of": as_of,
+        # The coordinator only routes to hardware-trusted providers; after a
+        # restart the level drops to self_signed until MDM and Apple device
+        # attestation re-verify. This is the per-host penalty-box signal.
+        "trust_level": daemon.get("trust_level") if daemon else None,
+        "trust_reason": daemon.get("trust_reason") if daemon else None,
         "last_served_at": max(served.values()) if served else None,
         "models": [
             {"model": m, "advertised": m in advertised, "warm": m in warm,
