@@ -56,15 +56,34 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
     payload = json.loads(raw)
     current_time = time.time() if now is None else now
     written_at = float(payload.get("written_at") or 0)
-    warm = tuple(str(m) for m in (payload.get("warm_models") or []) if m)
+    trust = _section(payload, "trust")
     return DaemonState(
-        current_model=str(payload["current_model"]) if payload.get("current_model") else None,
-        warm_models=warm,
+        current_model=_text(payload.get("current_model")),
+        warm_models=_model_ids(payload, "warm_models"),
         inference_active=bool(payload.get("inference_active")),
         pid=int(payload.get("pid") or 0),
         started_at=float(payload.get("started_at") or 0),
-        fresh=written_at > 0 and current_time - written_at <= cfg.daemon_freshness_seconds,
+        # abs(): a Mac clock slightly ahead of ours must not read as stale forever.
+        fresh=written_at > 0 and abs(current_time - written_at) <= cfg.daemon_freshness_seconds,
+        advertised_models=_model_ids(payload, "advertised_models"),
+        requests_served=int(_section(payload, "stats").get("requests_served") or 0),
+        trust_level=_text(trust.get("trust_level")),
+        trust_reason=_text(trust.get("reason")),
     )
+
+
+def _section(payload: dict[str, object], key: str) -> dict[str, object]:
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _text(value: object) -> str | None:
+    return str(value) if value else None
+
+
+def _model_ids(payload: dict[str, object], key: str) -> tuple[str, ...]:
+    values = payload.get(key)
+    return tuple(str(m) for m in values if m) if isinstance(values, list) else ()
 
 
 def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:

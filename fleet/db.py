@@ -38,6 +38,21 @@ CREATE TABLE IF NOT EXISTS daemon_snapshots (
 );
 CREATE INDEX IF NOT EXISTS daemon_snapshots_host_time
     ON daemon_snapshots (host, observed_at DESC);
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS advertised_models TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS requests_served BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS trust_level TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS trust_reason TEXT;
+
+-- One row per model the coordinator will route to on our machines, per probe.
+-- A probe that found nothing routable writes one row with model = '' so the
+-- gap itself is recorded: that gap is the post-restart penalty box.
+CREATE TABLE IF NOT EXISTS self_route_samples (
+    id BIGSERIAL PRIMARY KEY,
+    observed_at DOUBLE PRECISION NOT NULL,
+    model TEXT NOT NULL,
+    routable_providers INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS self_route_samples_time ON self_route_samples (observed_at DESC);
 
 CREATE TABLE IF NOT EXISTS earnings (
     host TEXT NOT NULL,
@@ -106,9 +121,19 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO daemon_snapshots (host, observed_at, current_model, warm_models, "
-            "inference_active, fresh, pid, started_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            "inference_active, fresh, pid, started_at, advertised_models, requests_served, "
+            "trust_level, trust_reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
-             daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at),
+             daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
+             list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason),
+        )
+
+
+def insert_self_route_samples(pool: ConnectionPool, observed_at: float, counts: dict[str, int]) -> None:
+    rows = [(observed_at, model, n) for model, n in counts.items()] or [(observed_at, "", 0)]
+    with pool.connection() as conn:
+        conn.cursor().executemany(
+            "INSERT INTO self_route_samples (observed_at, model, routable_providers) VALUES (%s,%s,%s)", rows
         )
 
 

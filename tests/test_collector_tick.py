@@ -14,7 +14,8 @@ def _cfg(**overrides) -> SimpleNamespace:
     base = {"host_label": "h", "base_url": "https://x", "pricing_url": "https://x/p", "models": ("a", "b"),
             "weights": {}, "ema_tau_minutes": 20.0, "poll_interval_seconds": 60.0, "relative_margin": 0.25,
             "absolute_margin": 0.01, "switch_cost_seconds": 300.0, "decision_horizon_seconds": 3600.0,
-            "min_dwell_seconds": 1800.0, "live_execution": True, "restart_backoff_seconds": 30.0}
+            "min_dwell_seconds": 1800.0, "live_execution": True, "restart_backoff_seconds": 30.0,
+            "probe_self_route": False, "api_key": None}
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -49,6 +50,23 @@ def test_ingest_earnings_stores_new_payouts_and_skips_an_unreachable_ledger(monk
     monkeypatch.setattr(collector.remote, "fetch_new_payouts", _boom)
     collector._ingest_earnings(_cfg(), None, 1.0)
     assert stored == [["p6"]]
+
+
+def test_the_probe_runs_only_on_the_probing_host_with_a_key(monkeypatch):
+    stored = []
+    monkeypatch.setattr(collector.demand, "fetch_self_route", lambda url, key: {"gpt-oss-20b": 1})
+    monkeypatch.setattr(collector.db, "insert_self_route_samples", lambda pool, now, counts: stored.append(counts))
+    collector._probe_self_route(_cfg(api_key="k"), None, 1.0)
+    collector._probe_self_route(_cfg(probe_self_route=True), None, 1.0)
+    collector._probe_self_route(_cfg(probe_self_route=True, api_key="k"), None, 1.0)
+    assert stored == [{"gpt-oss-20b": 1}]
+
+
+def test_a_failed_probe_is_logged_not_stored(monkeypatch, caplog):
+    monkeypatch.setattr(collector.demand, "fetch_self_route", _boom)
+    monkeypatch.setattr(collector.db, "insert_self_route_samples", _boom)
+    collector._probe_self_route(_cfg(probe_self_route=True, api_key="k"), None, 1.0)
+    assert "self-route probe unavailable" in caplog.text
 
 
 def test_decide_anchors_dwell_on_the_daemon_start(monkeypatch):
@@ -104,6 +122,7 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
 
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
     monkeypatch.setattr(collector.db, "insert_daemon_snapshot", record("snapshot"))
+    monkeypatch.setattr(collector, "_probe_self_route", record("probe"))
     monkeypatch.setattr(collector, "_fetch_scores", lambda cfg: ({"a": CapacitySample("a", 2, 1, 2.0)}, {"a": 0.1}))
     monkeypatch.setattr(collector.db, "load_ema", lambda pool, host: ({"a": 0.1}, 50.0))
     monkeypatch.setattr(collector.db, "save_ema", record("save_ema"))
@@ -112,4 +131,4 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector, "_decide", lambda cfg, pool, ema, daemon, now: Decision("a", "keep", "KEEP"))
     monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now: calls.append(("act", current)))
     collector.run_tick(_cfg(), None)
-    assert calls == ["snapshot", "save_ema", "samples", "earnings", ("act", "a")]
+    assert calls == ["snapshot", "probe", "save_ema", "samples", "earnings", ("act", "a")]

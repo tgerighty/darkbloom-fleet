@@ -6,13 +6,26 @@
 - ~~[NOW] [FEATURE] Cluster prep: DB password secret, Gluster data directory~~
 - ~~[NOW] [FEATURE] SSH secrets, compose destination directory, release webhook~~
 - ~~[NOW] [FIX] Sonar round 1 (30 findings) and CodeRabbit round 1 (12 findings)~~
-- [NOW] [FIX] [IN-PROGRESS] CodeRabbit CLI round 2 (6 of 7 fixed; observe-mode
-  target clearing skipped: observe mode stays read-only) and Sonar complexity
-- [NEXT] [FEATURE] Merge, verify the nxio-deploy release
-- [NEXT] [FEATURE] nginx vhost for darkbloom.nxio.ai (Cloudflare needs no
-  change: the `*.nxio.ai` DNS, tunnel rule and Access app already cover it)
+- ~~[NOW] [FIX] CodeRabbit CLI round 2 and Sonar complexity~~
+- ~~[NEXT] [FEATURE] Merge, verify the nxio-deploy release~~ (PR #1 merged 2026-09-12 06:02Z; deploy 5181449 verified)
+- ~~[NEXT] [FEATURE] nginx vhost for darkbloom.nxio.ai~~ (conf 1fe6f95, 3 replicas, Access 302 verified)
+- [NOW] [FEATURE] [IN-PROGRESS] PR #2: self-route routability probe, per-host
+  models panel (advertised / warm / routable / last served), single demand
+  table, serving windows with idle, scrolling decisions, 1-minute refresh
 - [NEXT] [FEATURE] pg_back backup registration
 - [NEXT] [REFACTOR] Retire the cm7 docker compose copy
+- [NEXT] [BUG] CodeRabbit 2026-09-12, pre-existing logic, deferred from PR #2:
+  empty demand scores must not refresh/save the EMA (tick should WAIT);
+  the restart-retry backoff should not be recorded as a decision error, or it
+  extends itself every tick; observe mode should clear a stale remote watcher
+  target; the "no eligible current model" branch in decision.py skips the
+  idle and dwell gates.
+- [NEXT] [REFACTOR] CodeRabbit round 4 (deferred): key hosts by an immutable
+  id rather than the editable label; filter the restored EMA to cfg.models so
+  a removed model cannot linger; wrap the lifespan shutdown in try/finally.
+- [NEXT] [FEATURE] Measured switch penalty: feed the routability probe's
+  first-request timings back into the switch-cost guardrail instead of the
+  fixed 300 s.
 - [NEXT] [BUG] The payout ledger is account-wide on every Mac, so per-host
   earnings count other machines' payouts. Attribute payouts to a host by
   matching each provider_hash session to that host's daemon restarts.

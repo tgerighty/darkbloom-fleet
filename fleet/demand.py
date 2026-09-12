@@ -5,7 +5,7 @@ warm_model_manager.py's fetch_output_prices() — stdlib only, no SSH needed.
 from __future__ import annotations
 
 import json
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .scoring import pressure_from_capacity
 from .types import CapacitySample
@@ -14,19 +14,59 @@ USER_AGENT = "darkbloom-fleet/0.1"
 Json = dict[str, object] | list[object]
 
 
-def _get_json(url: str) -> Json:
-    request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
-    with urlopen(request, timeout=20) as response:
+class _NoRedirect(HTTPRedirectHandler):
+    """An authenticated request must never follow a redirect: the bearer
+    token would be replayed to whatever origin the redirect names."""
+
+    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+
+def _get_json(url: str, headers: dict[str, str] | None = None) -> Json:
+    request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT, **(headers or {})})
+    opener = build_opener(_NoRedirect()).open if headers else urlopen
+    with opener(request, timeout=20) as response:
         return json.load(response)
+
+
+def _routable_count(row: object) -> tuple[str, int] | None:
+    """(model id, routable providers) from one self-route listing row."""
+    if not isinstance(row, dict) or not row.get("id"):
+        return None
+    meta = row.get("metadata")
+    routable = meta.get("routable_providers") if isinstance(meta, dict) else 0
+    try:
+        return str(row["id"]), int(routable or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
+    """Models the coordinator will route to on OUR machines right now, with how
+    many of our providers it counts as routable for each. The self-route view
+    lists what is advertised and passes the routing gates, not what is warm,
+    so an empty result means every owned machine is in the post-restart
+    penalty box (darkbloom-manager/analysis/switch-penalty). It relaxes the
+    hardware-trust floor for owned machines, so public routing additionally
+    needs the daemon's trust_level to be "hardware"."""
+    headers = {"Authorization": f"Bearer {api_key}", "X-Darkbloom-Route": "self"}
+    payload = _get_json(f"{base_url.rstrip('/')}/v1/models", headers)
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        # A wrong-shaped 200 must not be recorded as "nothing routable".
+        raise TypeError("self-route payload is not a model listing")
+    return {c[0]: c[1] for row in rows if (c := _routable_count(row))}
 
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models/capacity")
     if isinstance(payload, dict):
         payload = payload.get("data", payload.get("models", []))
-    rows = payload if isinstance(payload, list) else []
+    if not isinstance(payload, list):
+        # Same rule as fetch_self_route: a wrong shape is an error, not "no demand".
+        raise TypeError("capacity payload is not a model list")
     samples: dict[str, CapacitySample] = {}
-    for row in rows:
+    for row in payload:
         sample = pressure_from_capacity(row)
         if sample:
             samples[sample.model] = sample

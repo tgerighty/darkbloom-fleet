@@ -19,15 +19,49 @@ def test_get_json_sends_the_user_agent_and_parses_the_body(monkeypatch):
     assert seen == {"ua": demand.USER_AGENT, "timeout": 20}
 
 
+def test_fetch_self_route_sends_the_key_and_reads_routable_counts(monkeypatch):
+    seen = {}
+
+    def fake_get(url, headers=None):
+        seen.update(url=url, headers=headers)
+        return {"data": [{"id": "a", "metadata": {"routable_providers": 2}}, {"id": "b"}, "junk", {"metadata": {}},
+                         {"id": "c", "metadata": {"routable_providers": "lots"}}]}
+
+    monkeypatch.setattr(demand, "_get_json", fake_get)
+    assert demand.fetch_self_route("https://x/", "k") == {"a": 2, "b": 0}
+    assert seen == {"url": "https://x/v1/models", "headers": {"Authorization": "Bearer k", "X-Darkbloom-Route": "self"}}
+
+
+def test_an_authenticated_request_refuses_redirects(monkeypatch):
+    seen = {}
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            seen["auth"] = request.get_header("Authorization")
+            return io.BytesIO(b'{"data": []}')
+
+    monkeypatch.setattr(demand, "build_opener", lambda handler: seen.setdefault("handler", handler) and FakeOpener())
+    assert demand._get_json("https://x", {"Authorization": "Bearer k"}) == {"data": []}
+    assert seen["auth"] == "Bearer k" and isinstance(seen["handler"], demand._NoRedirect)
+    assert seen["handler"].redirect_request(None, None, 302, "Found", {}, "https://elsewhere") is None
+
+
+def test_a_self_route_payload_of_the_wrong_shape_is_an_error_not_an_empty_listing(monkeypatch):
+    monkeypatch.setattr(demand, "_get_json", lambda url, headers=None: ["nope"])
+    with pytest.raises(TypeError, match="not a model listing"):
+        demand.fetch_self_route("https://x", "k")
+
+
 def test_fetch_capacity_reads_the_data_list(monkeypatch):
     payload = {"data": [{"id": "m", "active_requests": 4, "warm_providers": 2}, {"no_id": True}]}
     monkeypatch.setattr(demand, "_get_json", lambda url: payload)
     assert demand.fetch_capacity("https://x/") == {"m": CapacitySample("m", 4, 2, 2.0)}
 
 
-def test_a_capacity_payload_of_the_wrong_shape_yields_no_samples(monkeypatch):
+def test_a_capacity_payload_of_the_wrong_shape_is_an_error(monkeypatch):
     monkeypatch.setattr(demand, "_get_json", lambda url: "oops")
-    assert demand.fetch_capacity("https://x") == {}
+    with pytest.raises(TypeError, match="not a model list"):
+        demand.fetch_capacity("https://x")
 
 
 def test_a_pricing_payload_that_is_not_an_object_is_rejected(monkeypatch):
