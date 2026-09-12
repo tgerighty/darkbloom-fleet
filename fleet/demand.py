@@ -60,9 +60,11 @@ def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models/capacity")
     if isinstance(payload, dict):
         payload = payload.get("data", payload.get("models", []))
-    rows = payload if isinstance(payload, list) else []
+    if not isinstance(payload, list):
+        # Same rule as fetch_self_route: a wrong shape is an error, not "no demand".
+        raise TypeError("capacity payload is not a model list")
     samples: dict[str, CapacitySample] = {}
-    for row in rows:
+    for row in payload:
         sample = pressure_from_capacity(row)
         if sample:
             samples[sample.model] = sample

@@ -65,7 +65,9 @@ services:
       DARKBLOOM_HOST_2_SSH_TARGET: M1-64-1
       DARKBLOOM_HOST_2_LABEL: M1-64-1
       DARKBLOOM_HOST_2_SPEC: Apple M1 Max, 64GB RAM, 24 GPU cores
-      DARKBLOOM_HOST_2_MODELS: Qwen3.5-9B,gpt-oss-20b,gemma-4-26b-qat-4bit,qwen3-vl-30b-a3b-instruct,nvidia-nemotron-3.5-lightning,qwen3.5-35b-a3b,qwen3.6-35b-a3b-vl-mtp-mxfp8,gemma-4-26b,gemma-4-26b-8bit
+      # Qwen3.5-9B is deliberately absent: loading it breaks the provider's
+      # signed status payload (d-inference #825 / #870) and the node is never routed.
+      DARKBLOOM_HOST_2_MODELS: gpt-oss-20b,gemma-4-26b-qat-4bit,qwen3-vl-30b-a3b-instruct,nvidia-nemotron-3.5-lightning,qwen3.5-35b-a3b,qwen3.6-35b-a3b-vl-mtp-mxfp8,gemma-4-26b,gemma-4-26b-8bit
       # Observe only: the fleet records recommendations and never switches.
       FLEET_LIVE_EXECUTION: "false"
       POLL_INTERVAL_SECONDS: "60"

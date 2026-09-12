@@ -58,9 +58,10 @@ def test_fetch_capacity_reads_the_data_list(monkeypatch):
     assert demand.fetch_capacity("https://x/") == {"m": CapacitySample("m", 4, 2, 2.0)}
 
 
-def test_a_capacity_payload_of_the_wrong_shape_yields_no_samples(monkeypatch):
+def test_a_capacity_payload_of_the_wrong_shape_is_an_error(monkeypatch):
     monkeypatch.setattr(demand, "_get_json", lambda url: "oops")
-    assert demand.fetch_capacity("https://x") == {}
+    with pytest.raises(TypeError, match="not a model list"):
+        demand.fetch_capacity("https://x")
 
 
 def test_a_pricing_payload_that_is_not_an_object_is_rejected(monkeypatch):

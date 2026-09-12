@@ -136,8 +136,13 @@ function renderHost(s, index) {
 function render(s) {
   document.getElementById("fleet-subtitle").textContent = s.hosts.length + " host" + (s.hosts.length === 1 ? "" : "s") +
     " · refreshed " + new Date().toLocaleTimeString();
-  // Demand is network-wide but each host records only its configured models; show the fullest list.
-  const demand = s.hosts.reduce(function (best, h) { return h.demand.length > best.length ? h.demand : best; }, []);
+  // Demand is network-wide but each host records only its configured models: merge by model, newest sample wins.
+  const byModel = new Map();
+  s.hosts.forEach(function (h) { h.demand.forEach(function (r) {
+    const seen = byModel.get(r.model);
+    if (!seen || (r.observed_at || 0) > (seen.observed_at || 0)) byModel.set(r.model, r);
+  }); });
+  const demand = Array.from(byModel.values()).sort(function (a, b) { return (b.ema_score || 0) - (a.ema_score || 0); });
   document.getElementById("demand").innerHTML = renderDemand(demand);
   document.getElementById("hosts").innerHTML = s.hosts.map(renderHost).join("");
 }

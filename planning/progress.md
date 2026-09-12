@@ -20,6 +20,9 @@
   extends itself every tick; observe mode should clear a stale remote watcher
   target; the "no eligible current model" branch in decision.py skips the
   idle and dwell gates.
+- [NEXT] [REFACTOR] CodeRabbit round 4 (deferred): key hosts by an immutable
+  id rather than the editable label; filter the restored EMA to cfg.models so
+  a removed model cannot linger; wrap the lifespan shutdown in try/finally.
 - [NEXT] [FEATURE] Measured switch penalty: feed the routability probe's
   first-request timings back into the switch-cost guardrail instead of the
   fixed 300 s.
