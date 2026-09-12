@@ -7,6 +7,7 @@ and key path come from Config, which reads them from the environment.
 from __future__ import annotations
 
 import json
+import math
 import shlex
 import subprocess
 import time
@@ -116,11 +117,14 @@ def _widget_metrics(raw: str) -> dict[str, object]:
 
 
 def _optional_float(payload: dict[str, object], key: str) -> float | None:
+    """A finite float, or None: NaN/inf would poison the gauges and the
+    Postgres columns just as silently as a missing key."""
     value = payload.get(key)
     try:
-        return float(value) if value is not None else None
+        number = float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+    return number if number is not None and math.isfinite(number) else None
 
 
 def _capacity_gbs(payload: dict[str, object]) -> tuple[float | None, float | None, float | None]:

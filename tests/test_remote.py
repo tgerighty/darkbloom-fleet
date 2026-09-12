@@ -171,3 +171,10 @@ def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monk
     moves = [i for i, line in enumerate(lines) if line.startswith("mv -f ")]
     assert lines[0] == "set -e"
     assert len(moves) == 2 and max(moves) < launch
+
+
+def test_non_finite_widget_values_are_dropped():
+    from fleet.remote import _optional_float
+    assert _optional_float({"x": float("nan")}, "x") is None
+    assert _optional_float({"x": float("inf")}, "x") is None
+    assert _optional_float({"x": "0.5"}, "x") == 0.5

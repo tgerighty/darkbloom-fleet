@@ -1,6 +1,8 @@
 const TD = "</td><td>";
 const TR = "<tr><td>";
 const TR_END = "</td></tr>";
+const SPAN_END = SPAN_END;
+const SPAN_DIV_END = SPAN_DIV_END;
 const DIV_END = "</div>";
 const FOLD_END = "</details>";
 const WINDOWS = ["1h", "7h", "24h", "30d", "lifetime"];
@@ -61,7 +63,7 @@ function renderServing(shares) {
 function bandHtml(band) {
   const b = band || { state: "OFF", tone: "grey", detail: "", priority: "normal" };
   return '<div class="band ' + b.tone + '"><div class="band-line"><span>' + esc(BANDS[b.state] || b.state) +
-    '</span><span class="gvalue">priority: ' + esc(b.priority) + '</span></div>' +
+    '</span><span class="gvalue">priority: ' + esc(b.priority) + SPAN_DIV_END +
     '<div class="band-sub">' + esc(b.detail) + '</div></div>';
 }
 
@@ -93,14 +95,14 @@ function gpuRow(gpu) {
   return '<div class="gpu-row"><span class="glabel">gpu memory</span>' +
     '<div class="gtrack wide"><div class="gfill" style="width:' + pctOf(g.active_gb || 0) + '%"></div>' +
     '<div class="gfill cache" style="width:' + pctOf(g.cache_gb || 0) + '%"></div></div>' +
-    '<span class="gvalue">' + text + '</span></div>';
+    '<span class="gvalue">' + text + SPAN_DIV_END;
 }
 
 function chip(model, active) {
-  return '<span class="chip' + (active ? " active" : "") + '">' + esc(model) + (active ? " · active" : "") + '</span>';
+  return '<span class="chip' + (active ? " active" : "") + '">' + esc(model) + (active ? " · active" : "") + SPAN_END;
 }
 function chipRow(label, chips) {
-  return '<div class="chips"><span class="glabel">' + label + '</span>' +
+  return '<div class="chips"><span class="glabel">' + label + SPAN_END +
     (chips.length ? chips.join("") : '<span class="none">none</span>') + DIV_END;
 }
 
@@ -120,6 +122,7 @@ function kpiGrid(s, card) {
     tile("$" + num(s.earnings_usd_24h, 2), "$ earned 24h") +
     tile(fmtAge(k.last_served_at), "last served") +
     tile("console only", "reputation", "see darkbloom.dev") +
+    tile("console only", "avg ttft", "see darkbloom.dev") +
     DIV_END;
 }
 
@@ -129,15 +132,16 @@ function servingSection(s, index) {
   }).join("");
   return '<section><h2>Serving <select data-serving-window="' + index + '">' + options + '</select></h2>' +
     '<div class="sub">share of the window actively serving a request, per model; idle = warm with no request, ' +
-    'no model, or no data (1-minute samples)</div>' + renderServing((s.serving || {})[servingWindow]) + '</section>';
+    'no model, or no data (1-minute samples)</div>' + renderServing(s.serving?.[servingWindow]) + '</section>';
 }
 
 function slotRow(slot, current, busy) {
   const running = busy && slot.model === current;
-  const mtp = slot.mtp_active ? "active" : "inactive" + (slot.mtp_inactive_reason ? " (" + slot.mtp_inactive_reason + ")" : "");
-  return '<div class="slot-row"><span class="smodel">' + esc(slot.model) + '</span>' +
-    '<span class="sbadge ' + (running ? "run" : "idle") + '">' + (running ? "RUNNING" : "IDLE") + '</span>' +
-    '<span class="sdetail">kv=' + esc(slot.kv_backend || "–") + " · mtp " + esc(mtp) + '</span></div>';
+  let mtp = "active";
+  if (!slot.mtp_active) mtp = slot.mtp_inactive_reason ? "inactive (" + slot.mtp_inactive_reason + ")" : "inactive";
+  return '<div class="slot-row"><span class="smodel">' + esc(slot.model) + SPAN_END +
+    '<span class="sbadge ' + (running ? "run" : "idle") + '">' + (running ? "RUNNING" : "IDLE") + SPAN_END +
+    '<span class="sdetail">kv=' + esc(slot.kv_backend || "–") + " · mtp " + esc(mtp) + SPAN_DIV_END;
 }
 
 function slotsSection(s, card) {
@@ -197,12 +201,12 @@ function payoutsSection(rows, unattributed) {
 
 function renderHost(s, index) {
   const card = s.card || EMPTY_CARD;
-  const state = (card.status || {}).state || "OFF";
+  const state = card.status?.state || "OFF";
   const loaded = card.loaded.map(function (c) { return chip(c.model, c.active); });
   const catalog = card.catalog.map(function (m) { return chip(m, false); });
   return '<div class="card ' + state.toLowerCase() + '">' +
     '<div class="card-head"><h1>' + esc(s.host.label) + '</h1><span class="sub">' + esc(s.host.spec) +
-    ' · daemon ' + fmtAge(s.as_of) + '</span><span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span></div>' +
+    ' · daemon ' + fmtAge(s.as_of) + '</span><span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + SPAN_DIV_END +
     bandHtml(card.status) +
     '<div class="card-body">' +
     resourceRow(s, card) + gpuRow(card.gpu) +
@@ -244,7 +248,7 @@ async function refresh() {
     if (!response.ok) throw new Error("HTTP " + response.status);
     lastStatus = await response.json();
   } catch (e) {
-    document.getElementById("fleet-subtitle").innerHTML = '<span class="err">status unavailable: ' + esc(e) + '</span>';
+    document.getElementById("fleet-subtitle").innerHTML = '<span class="err">status unavailable: ' + esc(e) + SPAN_END;
     return;
   }
   render(lastStatus);
