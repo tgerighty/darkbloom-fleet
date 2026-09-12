@@ -57,6 +57,17 @@ def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[R
         ).fetchall()
 
 
+def recent_earnings(pool: ConnectionPool, host: str, limit: int = 50) -> list[Row]:
+    """Latest payouts read from this host's ledger. The ledger is
+    account-wide, so rows are not attributable to this host (see progress.md)."""
+    with pool.connection() as conn:
+        return conn.execute(
+            "SELECT created_at, model, completion_tokens, micro_usd "
+            "FROM earnings WHERE host = %s ORDER BY created_at DESC LIMIT %s",
+            (host, limit),
+        ).fetchall()
+
+
 def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
     """Percentage of the window each model was warm, plus "idle" for the rest:
     no model warm, or no snapshot at all. Each snapshot holds until the next
@@ -120,5 +131,6 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600), 4),
         "serving": {name: serving_percentage(pool, host, seconds) for name, seconds in SERVING_WINDOWS.items()},
         "recent_decisions": recent_decisions(pool, host, limit=50),
+        "recent_earnings": recent_earnings(pool, host),
         "routability": routability_panel(pool, host, daemon),
     }

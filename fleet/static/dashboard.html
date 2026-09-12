@@ -22,7 +22,8 @@
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid light-dark(#0002, #fff2); }
   th { opacity: 0.6; font-weight: 500; }
-  .scroll { max-height: 11.5rem; overflow-y: auto; }
+  .scroll { max-height: 11.5rem; overflow-y: auto; }   /* ~5 rows */
+  .scroll.tall { max-height: 21rem; }                  /* ~10 rows */
   .scroll thead th { position: sticky; top: 0; background: light-dark(#f7f7f8, #17181c); }
   .bar-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.3rem 0; }
   .bar-label { width: 12rem; font-size: 0.85rem; flex-shrink: 0; }
@@ -108,6 +109,16 @@ function renderDecisions(decisions) {
     '<tbody>' + rows + '</tbody></table></div></section>';
 }
 
+function renderEarnings(rows) {
+  const body = rows.length ? rows.map(function (e) {
+    return "<tr><td>" + fmtAge(e.created_at) + TD + esc(e.model) + TD + e.completion_tokens + TD +
+      "$" + num(e.micro_usd / 1e6, 4) + "</td></tr>";
+  }).join("") : "<tr><td colspan=4><i>no payouts recorded yet</i></td></tr>";
+  return '<section><h2>Recent payouts</h2><div class="sub">from this host&#39;s ledger, which is account-wide</div>' +
+    '<div class="scroll tall"><table><thead><tr><th>when</th><th>model</th><th>completion tokens</th><th>paid</th></tr></thead>' +
+    '<tbody>' + body + '</tbody></table></div></section>';
+}
+
 function renderHost(s, index) {
   const badge = '<span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + '</span>';
   const subtitle = badge + " · daemon " + fmtAge(s.as_of) +
@@ -130,6 +141,7 @@ function renderHost(s, index) {
     '<section><h2>Serving percentage <select data-serving-window="' + index + '">' + options + '</select></h2>' +
       '<div>' + renderServing((s.serving || {})[servingWindow]) + '</div></section>' +
     renderDecisions(s.recent_decisions) +
+    renderEarnings(s.recent_earnings || []) +
   '</div>';
 }
 
