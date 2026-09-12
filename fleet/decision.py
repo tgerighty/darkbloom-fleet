@@ -30,6 +30,25 @@ def update_ema(ema: dict[str, float], scores: dict[str, float], dt_seconds: floa
     return updated
 
 
+def _unscored_current(
+    ema: dict[str, float],
+    current_model: str | None,
+    last_switch_at: float,
+    now: float,
+    inference_active: bool,
+    guardrails: Guardrails,
+) -> Decision:
+    """No eligible current model: move to the best-scored one, but only
+    through the same dwell and idle gates as any other switch."""
+    best = max(ema, key=ema.get)
+    if now - last_switch_at < guardrails.min_dwell_seconds:
+        remaining = guardrails.min_dwell_seconds - (now - last_switch_at)
+        return Decision(current_model, f"no eligible current model; minimum dwell has {remaining:.0f}s left", "KEEP")
+    if inference_active:
+        return Decision(best, f"no eligible current model; highest smoothed score {ema[best]:.3f}; waiting for idle", "SWITCH_WHEN_IDLE")
+    return Decision(best, f"no eligible current model; highest smoothed score {ema[best]:.3f}", "SWITCH")
+
+
 def decide(
     ema: dict[str, float],
     current_model: str | None,
@@ -44,8 +63,7 @@ def decide(
     if not ema:
         return Decision(current_model, "no scored models yet", "WAIT")
     if current_model not in ema:
-        best = max(ema, key=ema.get)
-        return Decision(best, f"no eligible current model; highest smoothed score {ema[best]:.3f}", "SWITCH")
+        return _unscored_current(ema, current_model, last_switch_at, now, inference_active, guardrails)
 
     horizon = guardrails.decision_horizon_seconds
     discount = max(0.0, (horizon - guardrails.switch_cost_seconds) / horizon)

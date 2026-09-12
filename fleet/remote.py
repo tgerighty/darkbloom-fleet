@@ -1,8 +1,8 @@
 """SSH-based ingestion from the managed host. Read-only except execute_switch
-and the fast-switch watcher controls, all gated by Config.live_execution and
-never called from the default observe-mode collector path. No hostnames or
-credentials live here — the SSH target and key path come from Config, which
-reads them from the environment.
+and the fast-switch watcher controls; all of those are gated by
+Config.live_execution except remove_fast_switch_target, the observe-mode
+stale-target cleanup. No hostnames or credentials live here — the SSH target
+and key path come from Config, which reads them from the environment.
 """
 from __future__ import annotations
 
@@ -109,6 +109,13 @@ def clear_fast_switch_target(cfg: Config) -> None:
     from an earlier tick can never act on a decision that no longer stands."""
     if not cfg.live_execution:
         raise RuntimeError("refusing to change the watcher target: FLEET_LIVE_EXECUTION is not enabled")
+    _run_ssh(cfg, f"rm -f {FAST_SWITCH_STATE_PATH}", timeout=15)
+
+
+def remove_fast_switch_target(cfg: Config) -> None:
+    """Unguarded counterpart to clear_fast_switch_target: the same plain rm -f,
+    allowed in observe mode so a target written by an earlier live tick is not
+    left behind for a still-running watcher to act on."""
     _run_ssh(cfg, f"rm -f {FAST_SWITCH_STATE_PATH}", timeout=15)
 
 

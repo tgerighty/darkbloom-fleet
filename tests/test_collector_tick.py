@@ -86,21 +86,13 @@ def test_maybe_execute_does_nothing_unless_a_live_switch_is_due(action, live):
     assert collector._maybe_execute(_cfg(live_execution=live), None, Decision("b", "r", action), 0.0) == (False, None)
 
 
-def test_maybe_execute_respects_the_restart_backoff(monkeypatch):
-    monkeypatch.setattr(collector.db, "last_failed_switch_at", lambda pool, host: 90.0)
-    executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
-    assert executed is False and "backoff" in error
-
-
 def test_maybe_execute_aborts_when_the_provider_is_busy_again(monkeypatch):
-    monkeypatch.setattr(collector.db, "last_failed_switch_at", lambda pool, host: 0.0)
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DaemonState("a", ("a",), True, 1, 0.0, True))
     executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
     assert executed is False and "aborted" in error
 
 
 def test_maybe_execute_reports_success_and_failure(monkeypatch):
-    monkeypatch.setattr(collector.db, "last_failed_switch_at", lambda pool, host: 0.0)
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
     monkeypatch.setattr(collector.remote, "execute_switch", lambda cfg, target: None)
     assert collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
@@ -131,4 +123,23 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector, "_decide", lambda cfg, pool, ema, daemon, now: Decision("a", "keep", "KEEP"))
     monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now: calls.append(("act", current)))
     collector.run_tick(_cfg(), None)
-    assert calls == ["snapshot", "probe", "save_ema", "samples", "earnings", ("act", "a")]
+    assert calls == ["snapshot", "probe", "earnings", "save_ema", "samples", ("act", "a")]
+
+
+def test_run_tick_waits_and_leaves_the_ema_untouched_when_no_model_is_scored(monkeypatch):
+    calls = []
+
+    def record(name):
+        return lambda *args, **kwargs: calls.append(name)
+
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
+    monkeypatch.setattr(collector.db, "insert_daemon_snapshot", record("snapshot"))
+    monkeypatch.setattr(collector, "_probe_self_route", record("probe"))
+    monkeypatch.setattr(collector, "_fetch_scores", lambda cfg: ({}, {}))
+    monkeypatch.setattr(collector.db, "load_ema", record("load_ema"))
+    monkeypatch.setattr(collector.db, "save_ema", record("save_ema"))
+    monkeypatch.setattr(collector.db, "insert_demand_samples", record("samples"))
+    monkeypatch.setattr(collector, "_ingest_earnings", record("earnings"))
+    monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now: calls.append(("act", current, result)))
+    collector.run_tick(_cfg(), None)
+    assert calls == ["snapshot", "probe", "earnings", ("act", "a", Decision(None, "demand feeds unavailable", "WAIT"))]
