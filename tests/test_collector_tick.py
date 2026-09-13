@@ -105,7 +105,32 @@ def test_decide_waits_without_a_fresh_daemon_read(daemon):
     assert collector._decide(_cfg(), None, {"a": 1.0, "b": 9.0}, daemon, 10_000.0).action == "WAIT"
 
 
-@pytest.mark.parametrize(("action", "live"), [("KEEP", True), ("SWITCH", False)])
+def _would_switch(monkeypatch):
+    monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: 0.0)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: None)
+    return {"a": 1.0, "b": 2.0}
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_thermal_gate_is_the_same_in_observe_and_live(monkeypatch, live):
+    ema = _would_switch(monkeypatch)
+    daemon = DaemonState("a", ("a",), False, 1, 100.0, True, thermal_state="critical")
+    result = collector._decide(_cfg(live_execution=live), None, ema, daemon, 10_000.0)
+    assert result.action == "BLOCKED" and "critical" in result.reason
+
+
+def test_trust_and_load_error_gates_run_in_the_shared_decide_path(monkeypatch):
+    ema = _would_switch(monkeypatch)
+    attest = DaemonState("a", ("a",), False, 1, 100.0, True, trust_level="self_signed")
+    keep = collector._decide(_cfg(), None, ema, attest, 10_000.0)
+    assert keep.action == "KEEP" and keep.target == "a"
+    recent = DaemonState("a", ("a",), False, 1, 100.0, True, trust_level="hardware",
+                         last_model_load_error_model="b", last_model_load_error_at=9_990.0)
+    blocked = collector._decide(_cfg(), None, ema, recent, 10_000.0)
+    assert blocked.action == "BLOCKED" and blocked.target == "b"
+
+
+@pytest.mark.parametrize(("action", "live"), [("KEEP", True), ("SWITCH", False), ("BLOCKED", True)])
 def test_maybe_execute_does_nothing_unless_a_live_switch_is_due(action, live):
     assert collector._maybe_execute(_cfg(live_execution=live), None, Decision("b", "r", action), 0.0) == (False, None)
 

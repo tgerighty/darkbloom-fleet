@@ -71,6 +71,21 @@ def test_the_card_assembles_resources_kpis_and_slots(fake_pool):
     assert built["catalog"] == ["a", "b"] and built["slots"] == slots
     assert built["kpis"] == {"requests": 12, "tokens": 4_000, "token_requests": 7,
                              "started_at": 100.0, "last_served_at": 9_950.0}
+    assert built["last_model_load_error"] is None
+
+
+def test_the_card_surfaces_a_recent_load_error(fake_pool):
+    snapshot = _daemon(last_model_load_error_model="b", last_model_load_error_message="oom",
+                       last_model_load_error_at=9_950.0)
+    built = card.build_card(fake_pool([{"tokens": 0, "requests": 0}]), "h", snapshot, None, [], 10_000.0)
+    assert built["last_model_load_error"] == {
+        "model": "b", "message": "oom", "at": 9_950.0, "recent": True,
+    }
+    old = card.build_card(fake_pool([{"tokens": 0, "requests": 0}]), "h",
+                          _daemon(last_model_load_error_model="b", last_model_load_error_message="oom",
+                                  last_model_load_error_at=9_000.0), None, [], 10_000.0)
+    assert old["last_model_load_error"]["recent"] is False
+    assert old["last_model_load_error"]["at"] == 9_000.0
 
 
 def test_session_totals_filters_by_window_and_attributed_sessions(fake_pool):

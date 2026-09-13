@@ -68,7 +68,18 @@ export function bandHtml(s, card) {
   const busy = s.inference_active ? "serving" : "idle";
   return '<div class="band ' + (b.tone || "grey") + '"><div class="band-line"><span>' +
     esc(BANDS[b.state] || b.state) + '</span><span class="gvalue">' + esc(model) + " · " + busy +
-    SPAN_DIV_END + '<div class="band-sub">' + esc(b.detail || "") + "</div>" + decisionBlock(s) + "</div>";
+    SPAN_DIV_END + '<div class="band-sub">' + esc(b.detail || "") + "</div>" +
+    loadErrorBlock(card) + decisionBlock(s) + "</div>";
+}
+
+function loadErrorBlock(card) {
+  const err = card && card.last_model_load_error;
+  if (!err) return "";
+  const when = err.at ? " (" + fmtAge(err.at) + ")" : "";
+  const model = err.model ? esc(err.model) + ": " : "";
+  const msg = esc(err.message || "load failed");
+  const cls = err.recent ? "band-sub err" : "band-sub";
+  return '<div class="' + cls + '">load error' + when + ": " + model + msg + "</div>";
 }
 
 function gauge(label, value, fill, cls) {

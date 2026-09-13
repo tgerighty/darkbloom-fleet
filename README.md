@@ -78,9 +78,10 @@ happened and why.
   and `slots` sections; a missing or malformed widget row degrades to empty
   card fields rather than failing the read.
 - **Guardrails**: EMA-smoothed switching (see "Credit" above), a 30-minute
-  minimum dwell, idle-gating before any real restart, and a 30-second
-  restart-retry backoff after a failed switch attempt. Defaults and
-  rationale are in `CONFIG.md`.
+  minimum dwell, idle-gating before any real restart, a 30-second
+  restart-retry backoff after a failed switch attempt, and pre-switch host
+  gates (hot thermal, non-hardware trust, recent load error for the target).
+  Defaults and rationale are in `CONFIG.md`.
 - **Deployment**: the cluster runs the Swarm stack in `deploy/stack.yml`,
   released by nxio-deploy (see CONFIG.md "Running on the cluster");
   `docker-compose.yml` runs the same app locally.

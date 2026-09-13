@@ -120,6 +120,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert status["recent_earnings"] == [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}]
     assert status["unattributed_recent"] == 2
     assert status["card"]["status"]["state"] == "ATTESTING"  # no trust level on the snapshot
+    assert status["card"]["last_model_load_error"] is None
     assert status["card"]["kpis"]["tokens"] == 4_000 and status["card"]["kpis"]["token_requests"] == 2
     # Hash ownership, not ingest host; current totals stop at now.
     earnings_calls = [params for sql, params in pool.calls if "sum(micro_usd)" in sql]

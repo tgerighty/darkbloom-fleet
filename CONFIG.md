@@ -102,6 +102,10 @@ SSH round trip:
   `gpu_memory_cache_gb`, `total_memory_gb`) and `slots` (per resident model:
   `model`, `kv_backend`, `mtp_enabled`, `mtp_active`,
   `mtp_inactive_reason`).
+- The daemon state's `last_model_load_error` (`model`, `message`, and `at` as
+  an absolute unix timestamp). Missing, malformed, or non-finite values become
+  NULL and never fail the daemon read. The card shows it; a matching target
+  whose error is at most 120 seconds old blocks a switch.
 
 Both land in `daemon_snapshots` (one ALTER-added column each; `slots` as
 JSONB), so the card needs no extra endpoint and history is queryable.
@@ -145,6 +149,12 @@ earnings-ledger data (2026-09-09 05:54 -> 2026-09-11 12:22 local):
   mid-shutdown, which reads to the coordinator as a failed request and drags
   down reputation. Restarting only when idle is what kept reputation intact
   across every switch in that project's session.
+- **Host safety gates** (same in OBSERVE and LIVE; OBSERVE still never
+  executes): a fresh thermal state of `serious` or `critical` returns
+  `BLOCKED`. A present `trust_level` other than `hardware` returns `KEEP`
+  (no restart during attestation). Absent trust is not treated as hardware
+  and does not block. A proposed target whose last load error is at most
+  120 seconds old returns `BLOCKED`; older errors and other models do not.
 - **30-second restart-retry backoff** after a failed switch attempt, not an
   immediate retry - also learned the hard way: `darkbloom start` can hit
   `launchctl bootstrap failed: ... Input/output error` when the previous

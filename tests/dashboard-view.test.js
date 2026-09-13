@@ -98,6 +98,29 @@ describe("no placeholder chrome", function () {
     expect(html).toContain("Serious");
     expect(html).toContain('gfill err');
   });
+
+  it("shows a recent load error in the band and escapes untrusted text", function () {
+    const html = bandHtml(host(), { ...host().card, last_model_load_error: {
+      model: "<b>", message: "<img src=x>", at: 1_700_000_000, recent: true,
+    } });
+    expect(html).toContain("load error");
+    expect(html).toMatch(/class="band-sub err">load error/);
+    expect(html).toContain("&lt;b&gt;");
+    expect(html).toContain("&lt;img src=x&gt;");
+    expect(html).not.toContain("<b>");
+    expect(html).not.toContain("<img src=x>");
+    expect(bandHtml(host(), host().card)).not.toContain("load error");
+  });
+
+  it("shows an old load error without the fault class", function () {
+    const html = bandHtml(host(), { ...host().card, last_model_load_error: {
+      model: "gemma", message: "oom", at: 1, recent: false,
+    } });
+    expect(html).toContain("load error");
+    expect(html).toContain("gemma");
+    expect(html).toContain("oom");
+    expect(html).not.toMatch(/class="band-sub err">load error/);
+  });
 });
 
 describe("malformed host isolation", function () {

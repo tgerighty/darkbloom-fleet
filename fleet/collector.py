@@ -82,7 +82,8 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
         decision_horizon_seconds=cfg.decision_horizon_seconds,
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
-    return decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    result = decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    return decision_mod.apply_host_gates(result, daemon, now)
 
 
 def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: float) -> tuple[bool, str | None]:

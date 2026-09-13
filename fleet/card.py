@@ -9,6 +9,7 @@ from __future__ import annotations
 from psycopg_pool import ConnectionPool
 
 from .attribution import unique_payouts_sql
+from .types import LOAD_ERROR_BLOCK_SECONDS
 
 Row = dict[str, object]
 
@@ -57,6 +58,22 @@ def _gpu(snapshot: Row) -> Row:
     return {"active_gb": active, "cache_gb": cache, "total_gb": snapshot.get("total_memory_gb"), "peak_gb": peak}
 
 
+def _load_error(snapshot: Row, now: float) -> Row | None:
+    """Last daemon load failure, or None when every field is missing."""
+    model = snapshot.get("last_model_load_error_model")
+    message = snapshot.get("last_model_load_error_message")
+    at = snapshot.get("last_model_load_error_at")
+    if model is None and message is None and at is None:
+        return None
+    age = None
+    try:
+        age = now - float(at) if at is not None else None
+    except (TypeError, ValueError):
+        age = None
+    return {"model": model, "message": message, "at": at,
+            "recent": age is not None and abs(age) <= LOAD_ERROR_BLOCK_SECONDS}
+
+
 def _loaded(snapshot: Row) -> list[Row]:
     """Warm models as chips; the current one is marked active while a request
     is actually in flight on it."""
@@ -100,4 +117,5 @@ def build_card(pool: ConnectionPool, host: str, daemon: Row | None,
                  "tokens": totals["tokens"], "token_requests": totals["requests"],
                  "started_at": started_at or None, "last_served_at": last_served_at},
         "slots": list(snapshot.get("slots") or []),
+        "last_model_load_error": _load_error(snapshot, now),
     }

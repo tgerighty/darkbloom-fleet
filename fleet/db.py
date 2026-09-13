@@ -57,6 +57,9 @@ ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS total_memory_gb DOUBLE PRE
 -- One JSON array of {model, kv_backend, mtp_enabled, mtp_active, mtp_inactive_reason}
 -- per snapshot: the daemon's resident model slots for the backend-slots panel.
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS slots JSONB;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_model TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_message TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_at DOUBLE PRECISION;
 
 -- One row per model the coordinator will route to on our machines, per probe.
 -- A probe that found nothing routable writes one row with model = '' so the
@@ -139,13 +142,16 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
             "INSERT INTO daemon_snapshots (host, observed_at, current_model, warm_models, "
             "inference_active, fresh, pid, started_at, advertised_models, requests_served, "
             "trust_level, trust_reason, thermal_state, memory_pressure, cpu_usage, fan_rpm, "
-            "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, slots) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, "
+            "last_model_load_error_model, last_model_load_error_message, last_model_load_error_at, slots) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
              daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
              list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason,
              daemon.thermal_state, daemon.memory_pressure, daemon.cpu_usage, daemon.fan_rpm,
              daemon.peak_temperature_c, daemon.gpu_active_gb, daemon.gpu_cache_gb, daemon.total_memory_gb,
+             daemon.last_model_load_error_model, daemon.last_model_load_error_message,
+             daemon.last_model_load_error_at,
              Jsonb([dataclasses.asdict(s) for s in daemon.slots])),
         )
 

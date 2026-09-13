@@ -178,3 +178,31 @@ def test_non_finite_widget_values_are_dropped():
     assert _optional_float({"x": float("nan")}, "x") is None
     assert _optional_float({"x": float("inf")}, "x") is None
     assert _optional_float({"x": "0.5"}, "x") == 0.5
+
+
+def test_fetch_daemon_state_reads_last_model_load_error(monkeypatch):
+    _capture(monkeypatch, _state_output(
+        '{"current_model": "a", "warm_models": ["a"], "written_at": 1000, '
+        '"last_model_load_error": {"model": "b", "message": "oom", "at": 990}}'))
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert (state.last_model_load_error_model, state.last_model_load_error_message,
+            state.last_model_load_error_at) == ("b", "oom", 990.0)
+
+
+def test_malformed_last_model_load_error_degrades_to_nulls_and_keeps_the_read(monkeypatch):
+    prefix = '{"current_model": "a", "warm_models": ["a"], "written_at": 1000, "last_model_load_error": '
+    cases = {
+        '"oops"}': (None, None, None),
+        "[]}": (None, None, None),
+        "1}": (None, None, None),
+        '{"model": "", "message": "", "at": null}}': (None, None, None),
+        '{"model": "b", "message": "x", "at": "nan"}}': ("b", "x", None),
+        '{"model": "b", "message": "x", "at": "inf"}}': ("b", "x", None),
+        '{"at": "nope"}}': (None, None, None),
+    }
+    for blob, expected in cases.items():
+        _capture(monkeypatch, _state_output(prefix + blob))
+        state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+        assert state.current_model == "a"
+        assert (state.last_model_load_error_model, state.last_model_load_error_message,
+                state.last_model_load_error_at) == expected

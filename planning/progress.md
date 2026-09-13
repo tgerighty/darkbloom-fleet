@@ -12,6 +12,9 @@
   row counts (fleet/static/hourly.js); also fixes the self-referential
   SPAN_END/SPAN_DIV_END constants 774217a left in dashboard.js (TDZ crash
   on page load)
+- ~~[NOW] [FEATURE] Persist last_model_load_error and pre-switch host gates~~
+  (thermal serious/critical BLOCKED, non-hardware trust KEEP, recent matching
+  load error BLOCKED; same in OBSERVE and LIVE; card surfaces the error)
 - [NOW] [FEATURE] [IN-PROGRESS] Console-style per-host cards matching the
   darkbloom.dev "Your fleet" page: widget metrics + daemon capacity/slots
   ingested in the daemon-state SSH round trip (new daemon_snapshots columns),

@@ -48,8 +48,23 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
                                      "nominal", 0.41, 0.12, 1780.0, 62.5, 14.8, 1.2, 64.0)
     assert pool.calls[0][1][-1].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
                                          "mtp_active": False, "mtp_inactive_reason": "idle"}]
+    assert pool.calls[0][1][20:23] == (None, None, None)
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None)
     assert pool.calls[2][1] == ("live", True, None, 9)
+
+
+def test_daemon_snapshots_persist_last_model_load_error(fake_pool):
+    pool = fake_pool()
+    daemon = DaemonState("m", ("m",), False, 1, 0.5, True, last_model_load_error_model="n",
+                         last_model_load_error_message="oom", last_model_load_error_at=99.0)
+    db.insert_daemon_snapshot(pool, "h", 1.0, daemon)
+    sql, row = pool.calls[0]
+    assert "last_model_load_error_model" in sql
+    assert "last_model_load_error_message" in sql
+    assert "last_model_load_error_at" in sql
+    assert row[20:23] == ("n", "oom", 99.0)
+    assert "last_model_load_error_model" in db.SCHEMA_SQL
+    assert "last_model_load_error_at" in db.SCHEMA_SQL
 
 
 def test_self_route_samples_record_an_empty_probe_too(fake_pool):

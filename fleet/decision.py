@@ -17,7 +17,11 @@ from __future__ import annotations
 
 import math
 
-from .types import Decision, Guardrails
+from .types import LOAD_ERROR_BLOCK_SECONDS, DaemonState, Decision, Guardrails
+
+_SWITCH_ACTIONS = frozenset({"SWITCH", "SWITCH_WHEN_IDLE"})
+_HOT_THERMAL = frozenset({"serious", "critical"})
+HARDWARE_TRUST = "hardware"
 
 
 def update_ema(ema: dict[str, float], scores: dict[str, float], dt_seconds: float, tau_minutes: float) -> dict[str, float]:
@@ -95,3 +99,37 @@ def decide(
         f"{challenger} clears margin on smoothed score ({challenger_score:.3f} vs {current_score:.3f})",
         "SWITCH",
     )
+
+
+def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decision:
+    """Pre-switch host gates. OBSERVE and LIVE share this path. Absent trust is
+    not treated as hardware and does not block (same as decide() today)."""
+    if result.action not in _SWITCH_ACTIONS:
+        return result
+    thermal = daemon.thermal_state
+    if thermal in _HOT_THERMAL:
+        return Decision(result.target, f"{result.reason}; blocked: thermal state is {thermal}", "BLOCKED")
+    trust = daemon.trust_level
+    if trust is not None and trust != HARDWARE_TRUST:
+        return Decision(
+            daemon.current_model,
+            f"{result.reason}; trust is {trust}, not hardware; no restart during attestation",
+            "KEEP",
+        )
+    err_model = daemon.last_model_load_error_model
+    err_at = daemon.last_model_load_error_at
+    if (err_model and err_at is not None and result.target == err_model
+            and abs(now - err_at) <= LOAD_ERROR_BLOCK_SECONDS):
+        age = abs(now - err_at)
+        return Decision(
+            result.target,
+            f"{result.reason}; blocked: {err_model} failed to load {age:.0f}s ago",
+            "BLOCKED",
+        )
+    if trust is None:
+        return Decision(
+            result.target,
+            f"{result.reason}; trust unknown: not treated as hardware, not blocking",
+            result.action,
+        )
+    return result

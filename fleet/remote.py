@@ -72,6 +72,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
     written_at = float(payload.get("written_at") or 0)
     trust = _section(payload, "trust")
     gpu_active, gpu_cache, gpu_total = _capacity_gbs(payload)
+    load_error = _model_load_error(payload)
     return DaemonState(
         current_model=_text(payload.get("current_model")),
         warm_models=_model_ids(payload, "warm_models"),
@@ -93,6 +94,9 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         gpu_cache_gb=gpu_cache,
         total_memory_gb=gpu_total,
         slots=_slots(payload),
+        last_model_load_error_model=load_error[0],
+        last_model_load_error_message=load_error[1],
+        last_model_load_error_at=load_error[2],
     )
 
 
@@ -156,6 +160,15 @@ def _slots(payload: dict[str, object]) -> tuple[Slot, ...]:
                 mtp_inactive_reason=_text(item.get("mtp_inactive_reason")),
             ))
     return tuple(slots)
+
+
+def _model_load_error(payload: dict[str, object]) -> tuple[str | None, str | None, float | None]:
+    """(model, message, at) from daemon-state.json. A missing, non-object, or
+    non-finite value becomes None and never fails the rest of the read."""
+    raw = payload.get("last_model_load_error")
+    if not isinstance(raw, dict):
+        return None, None, None
+    return _text(raw.get("model")), _text(raw.get("message")), _optional_float(raw, "at")
 
 
 def _section(payload: dict[str, object], key: str) -> dict[str, object]:
