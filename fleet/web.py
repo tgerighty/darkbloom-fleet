@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from psycopg_pool import ConnectionPool
 
@@ -28,7 +28,10 @@ NO_CACHE = {"Cache-Control": "no-cache"}
 
 
 class RevalidatedStaticFiles(StaticFiles):
-    def file_response(self, *args, **kwargs):
+    """Only file responses need the header: StaticFiles' 404/405 errors carry
+    no Last-Modified, so browsers never cache them heuristically."""
+
+    def file_response(self, *args, **kwargs) -> Response:
         response = super().file_response(*args, **kwargs)
         response.headers.update(NO_CACHE)
         return response
