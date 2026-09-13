@@ -23,5 +23,6 @@ describe("hourly job rendering", function () {
 
     expect(html).not.toContain("Legend:");
     expect(html).toContain("0% / 0%");
+    expect(hourlySection({})).toContain("Serving / idle");
   });
 });
