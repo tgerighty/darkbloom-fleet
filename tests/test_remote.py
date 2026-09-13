@@ -2,6 +2,7 @@
 other tests swap subprocess.run or _run_ssh, so none of this needs a network."""
 import dataclasses
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -154,7 +155,17 @@ def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
     commands = _capture(monkeypatch)
     remote.execute_switch(_cfg(True), "gpt-oss-20b")
     remote.clear_fast_switch_target(_cfg(True))
-    assert commands == ["darkbloom start --model gpt-oss-20b --idle-timeout 0", f"rm -f {remote.FAST_SWITCH_STATE_PATH}"]
+    assert commands == [
+        f"{remote.DARKBLOOM_BIN} start --model gpt-oss-20b --idle-timeout 0",
+        f"rm -f {remote.FAST_SWITCH_STATE_PATH}",
+    ]
+
+
+def test_live_switch_uses_the_watcher_binary_path_and_quotes_the_model(monkeypatch):
+    commands = _capture(monkeypatch)
+    remote.execute_switch(_cfg(True), "gpt oss; rm")
+    assert Path(remote.DARKBLOOM_BIN).expanduser() == Path.home() / ".darkbloom" / "bin" / "darkbloom"
+    assert commands == [f"{remote.DARKBLOOM_BIN} start --model 'gpt oss; rm' --idle-timeout 0"]
 
 
 def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):

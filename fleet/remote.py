@@ -17,6 +17,9 @@ from .config import Config
 from .types import DaemonState, Payout, Slot
 
 DAEMON_STATE_PATH = "~/.darkbloom/daemon-state.json"
+# Same binary the fast-switch watcher invokes as Path.home() / ".darkbloom" /
+# "bin" / "darkbloom". Bare `darkbloom` is not on non-interactive SSH PATH.
+DARKBLOOM_BIN = "~/.darkbloom/bin/darkbloom"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
 WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
 _WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
@@ -200,7 +203,7 @@ def execute_switch(cfg: Config, target_model: str) -> None:
     backoff; this makes no safety checks of its own — see collector.py."""
     if not cfg.live_execution:
         raise RuntimeError("refusing to execute a switch: FLEET_LIVE_EXECUTION is not enabled")
-    command = f"darkbloom start --model {shlex.quote(target_model)} --idle-timeout 0"
+    command = f"{DARKBLOOM_BIN} start --model {shlex.quote(target_model)} --idle-timeout 0"
     _run_ssh(cfg, command, timeout=300)
 
 
