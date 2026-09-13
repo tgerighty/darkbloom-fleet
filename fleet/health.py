@@ -55,7 +55,9 @@ def host_health(pool: ConnectionPool, host_id: str, daemon_row: Row | None, now:
     down = _down_or_stale(pool, host_id, now)
     if down["state"] == DAEMON_DOWN:
         return down
-    return _thrash(pool, host_id, now) or down
+    # Under the 2-minute DOWN threshold a qualifying dead session still
+    # matters more than the transient STALE label.
+    return _dead_session(pool, host_id, snapshot, now) or _thrash(pool, host_id, now) or down
 
 
 def _healthy(snapshot: Row, now: float) -> Row:
@@ -127,7 +129,7 @@ def _warm_flips(rows: list[Row]) -> tuple[int, float | None]:
         warm = frozenset(row.get("warm_models") or ())
         if prev is not None and warm != prev:
             flips += 1
-            if flips > WARM_FLIPS:
+            if flips > WARM_FLIPS and since is None:
                 since = float(row["observed_at"])
         prev = warm
     return flips, since
