@@ -45,6 +45,13 @@ def _assign_letters(order: list[str]) -> dict[str, str]:
     return letters
 
 
+def _percentages(busy: int, size: int) -> tuple[int, int]:
+    if not size:
+        return 0, 0
+    serving = round(100 * busy / size)
+    return serving, 100 - serving
+
+
 def _hour_rows(hours: range, newest: int, now: float, buckets: dict[int, dict[str, int]],
                portions: dict[int, list[Counter[str]]]) -> list[Row]:
     output = []
@@ -53,9 +60,9 @@ def _hour_rows(hours: range, newest: int, now: float, buckets: dict[int, dict[st
         values = [max(counts, key=lambda model, values=counts: (values[model], model)) if counts else None
                   for counts in portions[hour][:size]]
         busy = sum(value is not None for value in values)
-        serving = round(100 * busy / size) if size else 0
+        serving, idle = _percentages(busy, size)
         output.append({"hour": hour, "jobs": sum(buckets[hour].values()), "portions": values,
-                       "serving_percentage": serving, "idle_percentage": 100 - serving if size else 0})
+                       "serving_percentage": serving, "idle_percentage": idle})
     return output
 
 
