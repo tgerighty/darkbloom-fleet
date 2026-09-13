@@ -37,11 +37,15 @@ def test_buckets_letters_and_range_share(fake_pool):
                                {"letter": "N", "model": "nvidia-nemotron-3.5-lightning"}]
     assert panel["range_share"] == {"gemma-4-26b-qat": 97, "gpt-oss-20b": 2,
                                     "nvidia-nemotron-3.5-lightning": 1}
-    assert panel["rows"] == [{"hour": 97_200, "jobs": 100,
-                              "counts": {"gemma-4-26b-qat": 99, "nvidia-nemotron-3.5-lightning": 1}},
-                             {"hour": 93_600, "jobs": 5,
-                              "counts": {"gemma-4-26b-qat": 3, "gpt-oss-20b": 2}}]
-    assert pool.calls == [(hourly._HOURLY_SQL, ("h", 100_000.0 - 86_400, ["s1"]))]
+    assert panel["rows"][:2] == [{"hour": 97_200, "jobs": 100,
+                                  "counts": {"gemma-4-26b-qat": 99, "nvidia-nemotron-3.5-lightning": 1}},
+                                 {"hour": 93_600, "jobs": 5,
+                                  "counts": {"gemma-4-26b-qat": 3, "gpt-oss-20b": 2}}]
+    # Every hour of the last 24 has a row, newest first; idle hours are empty.
+    assert len(panel["rows"]) == 24
+    assert panel["rows"][2] == {"hour": 90_000, "jobs": 0, "counts": {}}
+    assert panel["rows"][-1]["hour"] == 97_200 - 23 * 3_600
+    assert pool.calls == [(hourly._HOURLY_SQL, ("h", 97_200 - 23 * 3_600, ["s1"]))]
 
 
 def test_more_than_36_models_share_the_overflow_glyph():

@@ -76,12 +76,20 @@ function pctHtml(counts, jobs, legend) {
   }).join("/");
 }
 
+const DOT = '<span class="gap">·</span>';
+
+function bucketHtml(row, legend) {
+  // An hour the host served nothing keeps its row, marked with a single dot.
+  if (!row.jobs) return DOT;
+  return barHtml(row.counts, row.jobs, legend) + COL_GAP + pctHtml(row.counts, row.jobs, legend);
+}
+
 function rowsHtml(rows, legend) {
   let prevDate = null;
   return rows.map(function (row) {
     const parts = stampParts(row.hour);
     const line = stampField(parts, prevDate) + GAP + String(row.jobs).padStart(JOBS_W) + GAP +
-      barHtml(row.counts, row.jobs, legend) + COL_GAP + pctHtml(row.counts, row.jobs, legend);
+      bucketHtml(row, legend);
     prevDate = parts.date;
     return line;
   }).join(NL);
