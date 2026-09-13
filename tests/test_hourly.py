@@ -55,3 +55,10 @@ def test_more_than_36_models_share_the_overflow_glyph():
     assert len(letters) == 40
     assert sum(1 for v in letters.values() if v == OVERFLOW) == 4
     assert len({v for v in letters.values() if v != OVERFLOW}) == 36
+
+
+def test_exact_hour_boundary_has_no_phantom_idle_portion_and_ignores_future_rows(fake_pool):
+    future = [{"hour": 100_800.0, "portion": 0, "model": "a", "n": 1}]
+    panel = hourly.hourly_jobs(fake_pool(future), "h", ["s1"], 97_200.0)
+    assert panel["rows"][0] == {"hour": 97_200, "jobs": 0, "portions": [],
+                                "serving_percentage": 0, "idle_percentage": 0}
