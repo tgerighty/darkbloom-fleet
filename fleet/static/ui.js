@@ -1,8 +1,9 @@
 const TD = "</td><td>";
 const TR = "<tr><td>";
 
-function esc(v) {
-  return v === null || v === undefined ? "" : String(v).replaceAll(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" };
+export function esc(v) {
+  return v === null || v === undefined ? "" : String(v).replaceAll(/[&<>"'`]/g, (c) => ESC[c]);
 }
 function num(v, digits) { return v === null || v === undefined ? "–" : Number(v).toFixed(digits); }
 

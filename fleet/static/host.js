@@ -1,3 +1,6 @@
+import { esc } from "./ui.js?v=3";
+export { esc };
+
 const TD = "</td><td>";
 const TR = "<tr><td>";
 const TR_END = "</td></tr>";
@@ -36,17 +39,12 @@ function clock(epoch) {
 }
 function num(v, digits) { return v === null || v === undefined ? "–" : Number(v).toFixed(digits); }
 function pct01(v) { return v === null || v === undefined ? "–" : Math.round(100 * v) + "%"; }
-function esc(v) {
-  return v === null || v === undefined ? "" : String(v).replaceAll(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-}
 function mins(v) { return v === null || v === undefined ? "not yet" : v + " min"; }
 function yes(v) { return v ? "yes" : "–"; }
 function tri(v) {
   if (v === null || v === undefined) return "unknown";
   return v ? "yes" : "–";
 }
-export { esc };
-
 export function actionLabel(decision, mode) {
   if (!decision || !decision.action) return "";
   const switchLike = decision.action === "SWITCH" || decision.action === "SWITCH_WHEN_IDLE";

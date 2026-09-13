@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { actionLabel, bandHtml, renderHost, renderHosts } from "../fleet/static/host.js";
+import { actionLabel, bandHtml, errorCard, renderHost, renderHosts } from "../fleet/static/host.js";
 import { mergeDemand, renderDemand } from "../fleet/static/ui.js";
 
 function host(over = {}) {
@@ -174,6 +174,16 @@ describe("malformed host isolation", function () {
     const html = renderHost({ host: { label: "M1", spec: "" }, mode: "OBSERVE", error: "timeout" }, "24h", "");
     expect(html).toContain("timeout");
     expect(html).toContain("M1");
+  });
+
+  it("escapes quotes in data-host attributes", function () {
+    const label = 'x" onfocus="alert(1)" tabindex="1';
+    const html = renderHost(host({ host: { label: label, spec: "" } }), "24h", "");
+    expect(html).toContain("data-host=\"x&quot; onfocus=&quot;alert(1)&quot; tabindex=&quot;1\"");
+    expect(html).not.toContain("onfocus=\"alert(1)\"");
+    const err = errorCard({ host: { label: label }, error: "e" }, null);
+    expect(err).toContain("data-host=\"x&quot; onfocus=&quot;alert(1)&quot; tabindex=&quot;1\"");
+    expect(err).not.toContain("onfocus=\"alert(1)\"");
   });
 });
 
