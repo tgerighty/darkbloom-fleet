@@ -1,11 +1,8 @@
-"""Jobs-per-hour panel: attributed payout counts bucketed by hour over the
-last 24 h, plus the letter legend the page's terminal-style rendering uses.
-Kept here so queries.py stays small (same split as card.py); the 40-char
-distribution bar and the percentages are drawn client-side from each row's
-`counts`, so the API stays data-only."""
+"""Jobs-per-hour panel: attributed payouts in 40 portions of each hour."""
 from __future__ import annotations
 
 import string
+from collections import Counter
 
 from psycopg_pool import ConnectionPool
 
@@ -13,6 +10,8 @@ Row = dict[str, object]
 
 HOUR_SECONDS = 3_600
 BUCKETS = 24  # the current hour and the 23 before it
+PORTIONS = 40
+PORTION_SECONDS = HOUR_SECONDS // PORTIONS
 ALPHABET = string.ascii_uppercase
 # Letters, then digits; anything beyond 36 models shares one overflow glyph
 # rather than failing the whole status payload.
@@ -20,8 +19,11 @@ LABELS = ALPHABET + string.digits
 OVERFLOW = "?"
 
 _HOURLY_SQL = (
-    "SELECT floor(created_at/3600)*3600 AS hour, model, count(*) AS n FROM earnings "
-    "WHERE host = %s AND created_at >= %s AND provider_hash = ANY(%s) GROUP BY 1,2 ORDER BY 1 DESC"
+    "SELECT floor(created_at/3600)*3600 AS hour, "
+    f"floor((created_at-floor(created_at/3600)*3600)/{PORTION_SECONDS}) AS portion, "
+    "model, count(*) AS n FROM earnings "
+    "WHERE host = %s AND created_at >= %s AND created_at <= %s AND provider_hash = ANY(%s) "
+    "GROUP BY 1,2,3 ORDER BY 1 DESC"
 )
 
 
@@ -44,30 +46,37 @@ def _assign_letters(order: list[str]) -> dict[str, str]:
 
 
 def hourly_jobs(pool: ConnectionPool, host: str, hashes: list[str], now: float) -> Row:
-    """Legend (letter + model, alphabetical), each model's share of the range,
-    and one row for every hour of the last 24, newest first. An hour the host
-    served nothing is still a row (jobs 0, empty counts) so the panel shows the
-    gap; with no jobs at all the panel is empty."""
+    """Return one model letter or idle dot for each elapsed hour portion."""
     newest = int(now // HOUR_SECONDS) * HOUR_SECONDS
     hours = range(newest, newest - BUCKETS * HOUR_SECONDS, -HOUR_SECONDS)
     with pool.connection() as conn:
-        rows = conn.execute(_HOURLY_SQL, (host, hours[-1], hashes)).fetchall()
+        rows = conn.execute(_HOURLY_SQL, (host, hours[-1], now, hashes)).fetchall()
     buckets: dict[int, dict[str, int]] = {hour: {} for hour in hours}
+    portions: dict[int, list[Counter[str]]] = {
+        hour: [Counter() for _ in range(PORTIONS)] for hour in hours
+    }
     for row in sorted(rows, key=lambda r: (float(r["hour"]), str(r["model"]))):
         bucket = buckets.get(int(row["hour"]))  # a skewed future row has no bucket
         if bucket is not None:
-            bucket[str(row["model"])] = int(row["n"])
+            model = str(row["model"])
+            count = int(row["n"])
+            bucket[model] = bucket.get(model, 0) + count
+            portions[int(row["hour"])][int(row["portion"])][model] += count
     totals: dict[str, int] = {}  # insertion order = order of first appearance
     for hour in reversed(hours):
         for model in sorted(buckets[hour]):
             totals[model] = totals.get(model, 0) + buckets[hour][model]
-    if not totals:
-        return {"legend": [], "range_share": {}, "rows": []}
     letters = _assign_letters(list(totals))
-    jobs = sum(totals.values())
+    output_rows = []
+    for hour in hours:
+        size = PORTIONS if hour < newest else max(0, min(PORTIONS, int((now - hour + PORTION_SECONDS - 1) // PORTION_SECONDS)))
+        values = [max(counts, key=lambda model: (counts[model], model)) if counts else None
+                  for counts in portions[hour][:size]]
+        busy = sum(value is not None for value in values)
+        serving = round(100 * busy / size) if size else 0
+        output_rows.append({"hour": hour, "jobs": sum(buckets[hour].values()), "portions": values,
+                            "serving_percentage": serving, "idle_percentage": 100 - serving if size else 0})
     return {
         "legend": [{"letter": letters[m], "model": m} for m in sorted(totals)],
-        "range_share": {m: round(100 * n / jobs) for m, n in sorted(totals.items())},
-        "rows": [{"hour": hour, "jobs": sum(buckets[hour].values()), "counts": buckets[hour]}
-                 for hour in hours],
+        "rows": output_rows,
     }

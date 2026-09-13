@@ -79,7 +79,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_990.0}
     votes = [{"provider_hash": "s1", "host": "m3", "votes": 2}, {"provider_hash": "s2", "host": "other", "votes": 9}]
-    hourly = [{"hour": 7_200.0, "model": "a", "n": 2}]  # the current hour at now=10_000
+    hourly = [{"hour": 7_200.0, "portion": 0, "model": "a", "n": 2}]
     pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}], [{"action": "KEEP"}], votes,
                                         hourly=hourly))
     status = queries.build_status(
@@ -93,10 +93,10 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert status["recent_decisions"] == [{"action": "KEEP"}]
     hourly_jobs = status["hourly_jobs"]
     assert hourly_jobs["legend"] == [{"letter": "A", "model": "a"}]
-    assert hourly_jobs["range_share"] == {"a": 100}
     assert len(hourly_jobs["rows"]) == 24
-    assert hourly_jobs["rows"][0] == {"hour": 7_200, "jobs": 2, "counts": {"a": 2}}
-    assert hourly_jobs["rows"][1] == {"hour": 3_600, "jobs": 0, "counts": {}}
+    assert hourly_jobs["rows"][0]["jobs"] == 2
+    assert hourly_jobs["rows"][0]["portions"][0] == "a"
+    assert hourly_jobs["rows"][1]["portions"] == [None] * 40
     assert status["recent_earnings"] == [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}]
     assert status["unattributed_recent"] == 2
     assert status["card"]["status"]["state"] == "ATTESTING"  # no trust level on the snapshot
