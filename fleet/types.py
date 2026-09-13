@@ -13,6 +13,15 @@ class CapacitySample:
 
 
 @dataclass(frozen=True)
+class Slot:
+    model: str
+    kv_backend: str | None = None  # e.g. "paged"
+    mtp_enabled: bool | None = None  # multi-token prediction compiled in
+    mtp_active: bool | None = None
+    mtp_inactive_reason: str | None = None
+
+
+@dataclass(frozen=True)
 class DaemonState:
     current_model: str | None
     warm_models: tuple[str, ...]
@@ -24,6 +33,18 @@ class DaemonState:
     requests_served: int = 0  # this daemon session's counter; resets on restart
     trust_level: str | None = None  # coordinator-granted: hardware | self_signed | ...; only "hardware" is routable
     trust_reason: str | None = None  # e.g. "continuity", "awaiting MDM verification"
+    # Mac widget metrics (~/.darkbloom-widget/metrics.db, latest sample); None when no widget runs there.
+    thermal_state: str | None = None  # macOS thermal state name, e.g. "nominal"
+    memory_pressure: float | None = None  # 0-1
+    cpu_usage: float | None = None  # 0-1
+    fan_rpm: float | None = None
+    peak_temperature_c: float | None = None
+    # GPU memory from the daemon's own capacity section; gpu_active_gb falls back
+    # to the widget's gpuActiveGb when the daemon does not report one.
+    gpu_active_gb: float | None = None
+    gpu_cache_gb: float | None = None
+    total_memory_gb: float | None = None
+    slots: tuple[Slot, ...] = ()  # one entry per model the daemon keeps resident
 
 
 @dataclass(frozen=True)

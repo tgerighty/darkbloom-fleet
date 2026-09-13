@@ -7,7 +7,13 @@ import pytest
 
 from fleet import remote
 from fleet.config import Config
-from fleet.types import DaemonState, Payout
+from fleet.types import DaemonState, Payout, Slot
+
+
+def _state_output(daemon_json: str, widget_json: str = "") -> str:
+    """What _STATE_COMMAND's single SSH round trip prints: the daemon doc, the
+    separator, then the widget's latest sample row (empty when absent)."""
+    return daemon_json + f"\n{remote._DOC_SEPARATOR}\n" + widget_json
 
 
 def _cfg(live_execution: bool) -> Config:
@@ -72,20 +78,70 @@ def test_run_ssh_passes_an_explicit_key_and_reports_failures(monkeypatch):
 
 
 def test_fetch_daemon_state_parses_and_judges_freshness(monkeypatch):
-    _capture(monkeypatch, '{"current_model": "a", "warm_models": ["a", ""], "inference_active": 1, '
-                          '"pid": "42", "started_at": 5, "written_at": 1000}')
+    _capture(monkeypatch, _state_output('{"current_model": "a", "warm_models": ["a", ""], "inference_active": 1, '
+                                        '"pid": "42", "started_at": 5, "written_at": 1000}'))
     assert remote.fetch_daemon_state(_cfg(False), now=1050.0) == DaemonState("a", ("a",), True, 42, 5.0, True)
     assert remote.fetch_daemon_state(_cfg(False), now=2000.0).fresh is False
     assert remote.fetch_daemon_state(_cfg(False), now=900.0).fresh is False  # future-dated state is not fresh
 
 
 def test_fetch_daemon_state_reads_advertised_models_and_the_request_counter(monkeypatch):
-    _capture(monkeypatch, '{"current_model": "a", "warm_models": ["a"], "advertised_models": ["a", "b"], '
-                          '"stats": {"requests_served": 7}, "written_at": 1000, '
-                          '"trust": {"trust_level": "self_signed", "reason": "awaiting MDM verification"}}')
+    _capture(monkeypatch, _state_output('{"current_model": "a", "warm_models": ["a"], "advertised_models": ["a", "b"], '
+                                        '"stats": {"requests_served": 7}, "written_at": 1000, '
+                                        '"trust": {"trust_level": "self_signed", "reason": "awaiting MDM verification"}}'))
     state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
     assert state.advertised_models == ("a", "b") and state.requests_served == 7
     assert (state.trust_level, state.trust_reason) == ("self_signed", "awaiting MDM verification")
+
+
+DAEMON_WITH_CAPACITY = ('{"current_model": "a", "warm_models": ["a"], "written_at": 1000, '
+                        '"capacity": {"gpu_memory_active_gb": 14.8, "gpu_memory_cache_gb": 1.2, "total_memory_gb": 64}, '
+                        '"slots": [{"model": "a", "kv_backend": "paged", "mtp_enabled": true, "mtp_active": true}, '
+                        '{"model": "b", "kv_backend": "naive", "mtp_active": false, "mtp_inactive_reason": "no mtp head"}]}')
+WIDGET_SAMPLE = ('{"thermalState": "nominal", "memoryPressure": 0.41, "cpuUsage": 0.12, "fanRPM": 1780.0, '
+                 '"gpuActiveGb": 15.0, "peakTemperatureC": 62.5, "timestamp": 1005}')
+
+
+def test_fetch_daemon_state_reads_the_widget_row_and_capacity_in_one_round_trip(monkeypatch):
+    commands = _capture(monkeypatch, _state_output(DAEMON_WITH_CAPACITY, WIDGET_SAMPLE))
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert (state.thermal_state, state.memory_pressure, state.cpu_usage) == ("nominal", 0.41, 0.12)
+    assert (state.fan_rpm, state.peak_temperature_c) == (1780.0, 62.5)
+    assert (state.gpu_active_gb, state.gpu_cache_gb, state.total_memory_gb) == (14.8, 1.2, 64)
+    assert state.slots == (Slot("a", "paged", True, True, None),
+                           Slot("b", "naive", None, False, "no mtp head"))
+    # One command carries both reads, and a missing widget DB must not fail it.
+    assert commands == [remote._STATE_COMMAND]
+    assert "sqlite3" in commands[0] and "|| true" in commands[0]
+
+
+def test_a_missing_or_malformed_widget_row_degrades_to_none_fields(monkeypatch):
+    for widget in ("", "not json at all", "[1, 2, 3]", '{"cpuUsage": "busy", "memoryPressure": null}',
+                   '{"thermalState": "fair"}'):
+        _capture(monkeypatch, _state_output(DAEMON_WITH_CAPACITY, widget))
+        state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+        assert (state.gpu_active_gb, state.gpu_cache_gb, state.total_memory_gb) == (14.8, 1.2, 64)
+        if widget == '{"thermalState": "fair"}':
+            assert state.thermal_state == "fair"
+        else:
+            assert (state.thermal_state, state.memory_pressure, state.cpu_usage,
+                    state.fan_rpm, state.peak_temperature_c) == (None,) * 5
+
+
+def test_the_widget_gpu_figure_stands_in_when_capacity_is_absent(monkeypatch):
+    daemon = '{"current_model": "a", "warm_models": ["a"], "written_at": 1000, "capacity": {}}'
+    _capture(monkeypatch, _state_output(daemon, WIDGET_SAMPLE))
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert state.gpu_active_gb == 15.0 and state.gpu_cache_gb is None and state.total_memory_gb is None
+
+
+def test_malformed_capacity_and_slots_leave_the_read_intact(monkeypatch):
+    daemon = ('{"current_model": "a", "warm_models": ["a"], "written_at": 1000, "capacity": "big", '
+              '"slots": [{"no_model": true}, "junk", {"model": "b", "mtp_active": "yes"}]}')
+    _capture(monkeypatch, _state_output(daemon, WIDGET_SAMPLE + "\n"))
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert (state.gpu_active_gb, state.gpu_cache_gb, state.total_memory_gb) == (15.0, None, None)
+    assert state.slots == (Slot("b", None, None, None, None),)
 
 
 def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
@@ -115,3 +171,10 @@ def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monk
     moves = [i for i, line in enumerate(lines) if line.startswith("mv -f ")]
     assert lines[0] == "set -e"
     assert len(moves) == 2 and max(moves) < launch
+
+
+def test_non_finite_widget_values_are_dropped():
+    from fleet.remote import _optional_float
+    assert _optional_float({"x": float("nan")}, "x") is None
+    assert _optional_float({"x": float("inf")}, "x") is None
+    assert _optional_float({"x": "0.5"}, "x") == 0.5

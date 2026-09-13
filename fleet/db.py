@@ -5,7 +5,10 @@ rather than a hosts table — no join, no multi-host abstraction to build yet
 """
 from __future__ import annotations
 
+import dataclasses
+
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from .types import CapacitySample, DaemonState, Decision, Outcome, Payout
@@ -43,6 +46,17 @@ ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS advertised_models TEXT[] N
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS requests_served BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS trust_level TEXT;
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS trust_reason TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS thermal_state TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS memory_pressure DOUBLE PRECISION;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS cpu_usage DOUBLE PRECISION;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS fan_rpm DOUBLE PRECISION;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS peak_temperature_c DOUBLE PRECISION;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS gpu_active_gb DOUBLE PRECISION;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS gpu_cache_gb DOUBLE PRECISION;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS total_memory_gb DOUBLE PRECISION;
+-- One JSON array of {model, kv_backend, mtp_enabled, mtp_active, mtp_inactive_reason}
+-- per snapshot: the daemon's resident model slots for the backend-slots panel.
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS slots JSONB;
 
 -- One row per model the coordinator will route to on our machines, per probe.
 -- A probe that found nothing routable writes one row with model = '' so the
@@ -124,10 +138,15 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
         conn.execute(
             "INSERT INTO daemon_snapshots (host, observed_at, current_model, warm_models, "
             "inference_active, fresh, pid, started_at, advertised_models, requests_served, "
-            "trust_level, trust_reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "trust_level, trust_reason, thermal_state, memory_pressure, cpu_usage, fan_rpm, "
+            "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, slots) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
              daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
-             list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason),
+             list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason,
+             daemon.thermal_state, daemon.memory_pressure, daemon.cpu_usage, daemon.fan_rpm,
+             daemon.peak_temperature_c, daemon.gpu_active_gb, daemon.gpu_cache_gb, daemon.total_memory_gb,
+             Jsonb([dataclasses.asdict(s) for s in daemon.slots])),
         )
 
 

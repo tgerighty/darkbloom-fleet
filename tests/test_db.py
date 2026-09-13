@@ -1,5 +1,5 @@
 from fleet import db
-from fleet.types import CapacitySample, DaemonState, Decision, Outcome, Payout
+from fleet.types import CapacitySample, DaemonState, Decision, Outcome, Payout, Slot
 
 
 def test_get_pool_uses_dict_rows(monkeypatch):
@@ -37,11 +37,17 @@ def test_bulk_inserts_write_one_row_per_item(fake_pool):
 
 def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     pool = fake_pool([], [{"id": 9}], [])
-    db.insert_daemon_snapshot(pool, "h", 1.0, DaemonState("m", ("m",), False, 42, 0.5, True))
+    daemon = DaemonState("m", ("m",), False, 42, 0.5, True, thermal_state="nominal", memory_pressure=0.41,
+                         cpu_usage=0.12, fan_rpm=1780.0, peak_temperature_c=62.5, gpu_active_gb=14.8,
+                         gpu_cache_gb=1.2, total_memory_gb=64.0, slots=(Slot("m", "paged", True, False, "idle"),))
+    db.insert_daemon_snapshot(pool, "h", 1.0, daemon)
     decision_id = db.insert_decision(pool, "h", 2.0, "m", Decision("n", "why", "SWITCH"), Outcome("live", False, None))
     db.record_outcome(pool, decision_id, Outcome("live", True, None))
     assert decision_id == 9
-    assert pool.calls[0][1] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0, None, None)
+    assert pool.calls[0][1][:20] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0, None, None,
+                                     "nominal", 0.41, 0.12, 1780.0, 62.5, 14.8, 1.2, 64.0)
+    assert pool.calls[0][1][-1].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
+                                         "mtp_active": False, "mtp_inactive_reason": "idle"}]
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None)
     assert pool.calls[2][1] == ("live", True, None, 9)
 

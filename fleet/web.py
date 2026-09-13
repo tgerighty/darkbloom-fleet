@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from psycopg_pool import ConnectionPool
 
 from . import queries
@@ -34,6 +35,9 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
             await asyncio.gather(*tasks)
 
     app = FastAPI(title="darkbloom-fleet", lifespan=lifespan)
+    # The page's JS lives next to the HTML it belongs with; mounting the whole
+    # static dir keeps that pairing without a per-file route each time it grows.
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/")
     async def index() -> FileResponse:

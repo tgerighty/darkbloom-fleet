@@ -9,7 +9,9 @@ from itertools import pairwise
 from psycopg_pool import ConnectionPool
 
 from .attribution import provider_hosts, unattributed_recent
+from .card import build_card
 from .config import Config
+from .hourly import hourly_jobs
 from .routability import routability_panel
 
 DAY_SECONDS = 86_400
@@ -129,6 +131,7 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
     demand = latest_demand_table(pool, host)
     attributed = provider_hosts(pool)
     hashes = [h for h, owner in attributed.items() if owner == host]
+    routability = routability_panel(pool, host, daemon, cfg.switch_cost_seconds)
     return {
         "host": {"label": cfg.host_label, "spec": cfg.host_spec},
         "mode": "LIVE" if cfg.live_execution else "OBSERVE",
@@ -143,5 +146,7 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "recent_decisions": recent_decisions(pool, host, limit=50),
         "recent_earnings": recent_earnings(pool, host, hashes),
         "unattributed_recent": unattributed_recent(pool, host, attributed),
-        "routability": routability_panel(pool, host, daemon, cfg.switch_cost_seconds),
+        "routability": routability,
+        "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now),
+        "hourly_jobs": hourly_jobs(pool, host, hashes, now),
     }

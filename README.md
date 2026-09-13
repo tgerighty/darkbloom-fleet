@@ -44,7 +44,12 @@ happened and why.
   network-wide demand dashboard - it doesn't wait on a human to run a
   script.
 - **Its own dashboard.** A real web UI the service serves itself, not a
-  page that needs anyone to keep it updated by hand.
+  page that needs anyone to keep it updated by hand. Each host renders as a
+  console-style card (status band, resource gauges, GPU memory bar,
+  loaded/catalog chips, KPI tiles, a "Jobs · hourly buckets" terminal panel
+  — one row per hour with a 40-letter per-model distribution bar over the
+  last 24 h — backend slots, trust & attestation)
+  mirroring the darkbloom.dev "Your fleet" page.
 - **Executes switches autonomously**, gated by configurable guardrails
   (idle-before-switch, EMA-smoothed confirmation, restart-retry backoff)
   - not just advisory, though v1 ships with those guardrails defaulted to
@@ -66,7 +71,12 @@ happened and why.
   (`POLL_INTERVAL_SECONDS`) - daemon state and the public demand/pricing
   feeds every tick, the real earnings ledger every tick since the last seen
   payout row. Each source fails independently and is logged; a bad tick
-  never crashes the service or blocks the others.
+  never crashes the service or blocks the others. The daemon-state read is
+  one SSH round trip that also fetches the latest row of the Mac widget's
+  metrics DB (`~/.darkbloom-widget/metrics.db` - thermal state, memory
+  pressure, CPU, fan, peak temperature) plus the daemon's own `capacity`
+  and `slots` sections; a missing or malformed widget row degrades to empty
+  card fields rather than failing the read.
 - **Guardrails**: EMA-smoothed switching (see "Credit" above), a 30-minute
   minimum dwell, idle-gating before any real restart, and a 30-second
   restart-retry backoff after a failed switch attempt. Defaults and
