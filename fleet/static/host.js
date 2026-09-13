@@ -19,6 +19,7 @@ const BANDS = {
 };
 const EMPTY_CARD = { status: null, resources: {}, gpu: {}, loaded: [], catalog: [], kpis: {}, slots: [] };
 const EMPTY_ROUT = { models: [], session: null, self_route_as_of: null, last_served_at: null, switch_cost: null };
+const HEALTH_TONE = { DAEMON_DOWN: "down", DEAD_SESSION: "down", THRASH: "warn", STALE: "warn", HEALTHY: "ok" };
 
 function fmtAge(epoch) {
   if (!epoch) return "never";
@@ -243,9 +244,11 @@ function proposedIndicator(manager) {
 
 function headHtml(s, host, card) {
   const mode = card.manager?.mode || "OFF";
+  const health = s.health || { state: "HEALTHY", detail: "" };
   return '<div class="card-head"><h1>' + esc(host.label) + '</h1><span class="sub">' +
     esc(host.spec) + " · daemon " + fmtAge(s.as_of) + '</span><span class="head-flags">' +
     '<span class="badge ' + String(mode).toLowerCase() + '">' + esc(mode) + SPAN_END +
+    '<span class="badge ' + (HEALTH_TONE[health.state] || "ok") + '" title="' + esc(health.detail) + '">' + esc(health.state) + SPAN_END +
     proposedIndicator(card.manager) + SPAN_DIV_END;
 }
 

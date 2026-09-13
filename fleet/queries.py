@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 from .attribution import provider_hosts, unattributed_recent, unique_payouts_sql
 from .card import build_card
 from .config import Config
+from .health import host_health
 from .hourly import hourly_jobs
 from .routability import latest_self_route, routability_panel
 
@@ -395,4 +396,5 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
         "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now,
                            cfg.daemon_freshness_seconds),
         "hourly_jobs": hourly_jobs(pool, hashes, now),
+        "health": host_health(pool, host, daemon, now),
     }
