@@ -48,6 +48,16 @@ def unique_payouts_sql(columns: str, where: str) -> str:
     )
 
 
+def _unique_vote_leaders(votes: dict[str, dict[str, int]]) -> dict[str, str]:
+    attributed: dict[str, str] = {}
+    for provider_hash, by_host in votes.items():
+        top = max(by_host.values())
+        winners = [host for host, count in by_host.items() if count == top]
+        if len(winners) == 1:
+            attributed[provider_hash] = winners[0]
+    return attributed
+
+
 def _attributed_from_votes(rows: list[Row]) -> dict[str, str]:
     """A payout votes only when exactly one host's counter rose in its
     interval. The hash then goes to the unique vote leader."""
@@ -67,13 +77,7 @@ def _attributed_from_votes(rows: list[Row]) -> dict[str, str]:
         host = next(iter(hosts))
         by_host = votes.setdefault(hash_for[payout_id], {})
         by_host[host] = by_host.get(host, 0) + 1
-    attributed: dict[str, str] = {}
-    for provider_hash, by_host in votes.items():
-        top = max(by_host.values())
-        winners = [host for host, count in by_host.items() if count == top]
-        if len(winners) == 1:
-            attributed[provider_hash] = winners[0]
-    return attributed
+    return _unique_vote_leaders(votes)
 
 
 def provider_hosts(pool: ConnectionPool) -> dict[str, str]:

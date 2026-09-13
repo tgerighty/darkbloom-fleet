@@ -144,7 +144,7 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switc
         # attestation re-verify. One of the per-host penalty-box signals.
         "trust_level": snapshot.get("trust_level"),
         "trust_reason": snapshot.get("trust_reason"),
-        "last_served_at": max(served.values()) if served else None,
+        "last_served_at": max(served.values(), default=None),
         "models": [
             {"model": m, "advertised": m in advertised, "warm": m in warm,
              "routable_providers": counts.get(m, 0), "last_served_at": served.get(m),

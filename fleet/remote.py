@@ -119,6 +119,15 @@ def fetch_installed_models(cfg: Config) -> tuple[str, ...]:
     return ids
 
 
+def _installed_model_id(item: object) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    model_id = item.get("id")
+    if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
+        return None
+    return model_id
+
+
 def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
     """Non-empty string models[].id values, first-seen order. None = unknown
     (malformed item, oversize id/list, or unreadable JSON/shape). An empty
@@ -133,17 +142,12 @@ def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
     if not isinstance(models, list) or len(models) > _MAX_INSTALLED_MODELS:
         return None
     ids: list[str] = []
-    seen: set[str] = set()
     for item in models:
-        if not isinstance(item, dict):
+        model_id = _installed_model_id(item)
+        if model_id is None:
             return None
-        model_id = item.get("id")
-        if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
-            return None
-        if model_id not in seen:
-            seen.add(model_id)
-            ids.append(model_id)
-    return tuple(ids)
+        ids.append(model_id)
+    return tuple(dict.fromkeys(ids))
 
 
 def _split_documents(raw: str) -> tuple[str, str]:

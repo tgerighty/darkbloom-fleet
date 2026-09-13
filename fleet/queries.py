@@ -151,12 +151,12 @@ def _window_shares(snapshots: list[Row], window_seconds: float | None, now: floa
     The latest row at or before `since` is the state already in force; later
     rows fill the window. Every window of one status row uses the same `now`."""
     snapshots = [snap for snap in snapshots if float(snap["observed_at"]) <= now]
-    if window_seconds is None:
-        if not snapshots:
-            return {}
-        since = min(float(row["observed_at"]) for row in snapshots)
-    else:
+    if window_seconds is not None:
         since = now - window_seconds
+    elif not snapshots:
+        return {}
+    else:
+        since = min(float(row["observed_at"]) for row in snapshots)
     before = None
     after: list[Row] = []
     for snap in snapshots:

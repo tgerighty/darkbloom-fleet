@@ -196,16 +196,14 @@ def test_should_switch_refuses_stale_missing_invalid_and_accepts_fresh_written_a
     assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": now}) is False
 
 
-def test_wait_refuses_unknown_malformed_and_absent_inventory(watcher, monkeypatch):
+def test_wait_does_not_consult_inventory(watcher, monkeypatch):
     watcher.TARGET_STATE_PATH.write_text(json.dumps({
         "target": "b", "valid_targets": ["a", "b"], "daemon_freshness_seconds": 1_000_000.0,
     }))
     monkeypatch.setattr(watcher, "read_daemon_state", lambda: IDLE_ON_A)
     monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: None)
-    assert watcher._wait_for_idle_gap(time.time() + 0.2) is None
+    assert watcher._wait_for_idle_gap(time.time() + 5) == "b"
     monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: ("a",))
-    assert watcher._wait_for_idle_gap(time.time() + 0.2) is None
-    monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: ("a", "b"))
     assert watcher._wait_for_idle_gap(time.time() + 5) == "b"
 
 

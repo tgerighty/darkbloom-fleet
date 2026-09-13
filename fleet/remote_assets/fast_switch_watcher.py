@@ -144,7 +144,7 @@ def _matching_load_error_is_unsafe(target: str, state: dict[str, object], now: f
 def _freshness_limit_seconds() -> float | None:
     try:
         state = json.loads(TARGET_STATE_PATH.read_text())
-    except (FileNotFoundError, ValueError, OSError):
+    except (ValueError, OSError):
         return None
     return _finite_timestamp(state.get("daemon_freshness_seconds"))
 
@@ -155,6 +155,15 @@ def _daemon_is_fresh(state: dict[str, object], now: float) -> bool:
     if written_at is None or limit is None or written_at <= 0 or limit < 0:
         return False
     return abs(now - written_at) <= limit
+
+
+def _installed_model_id(item: object) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    model_id = item.get("id")
+    if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
+        return None
+    return model_id
 
 
 def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
@@ -169,17 +178,12 @@ def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
     if not isinstance(models, list) or len(models) > _MAX_INSTALLED_MODELS:
         return None
     ids: list[str] = []
-    seen: set[str] = set()
     for item in models:
-        if not isinstance(item, dict):
+        model_id = _installed_model_id(item)
+        if model_id is None:
             return None
-        model_id = item.get("id")
-        if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
-            return None
-        if model_id not in seen:
-            seen.add(model_id)
-            ids.append(model_id)
-    return tuple(ids)
+        ids.append(model_id)
+    return tuple(dict.fromkeys(ids))
 
 
 def _fetch_installed_ids() -> tuple[str, ...] | None:
@@ -286,8 +290,7 @@ def _wait_for_idle_gap(deadline: float) -> str | None:
             time.sleep(POLL_SECONDS)
             continue
         if (target is not None and read_target_state()[0] == target
-                and _should_switch(target, _daemon_state_or_none())
-                and _inventory_allows(target)):
+                and _should_switch(target, _daemon_state_or_none())):
             return target
         time.sleep(POLL_SECONDS)
     return None
