@@ -4,6 +4,8 @@ import {
   captureFocus, captureUiState, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
 } from "./ui.js?v=4";
 
+const SUBTITLE_ID = "fleet-subtitle";
+
 let servingWindow = "24h";
 let lastStatus = null;
 let lastGoodAt = null;
@@ -19,13 +21,20 @@ function fmtAge(epoch) {
   return Math.round(s / 3600) + "h ago";
 }
 
+function subtitleEl() {
+  return document.getElementById(SUBTITLE_ID);
+}
+
+function showError(msg) {
+  subtitleEl().innerHTML = '<span class="err">' + msg + "</span>";
+}
+
 function setSubtitle(s) {
-  const n = s && s.hosts ? s.hosts.length : 0;
-  const el = document.getElementById("fleet-subtitle");
+  const n = s?.hosts ? s.hosts.length : 0;
+  const el = subtitleEl();
   if (pollError) {
     const age = lastGoodAt ? fmtAge(lastGoodAt) : "never";
-    el.innerHTML = '<span class="err">status unavailable: ' + esc(pollError) +
-      " · showing data from " + age + "</span>";
+    showError("status unavailable: " + esc(pollError) + " · showing data from " + age);
     return;
   }
   el.textContent = n + " host" + (n === 1 ? "" : "s") +
@@ -43,8 +52,7 @@ function render(s) {
     restoreUiState(hostsRoot.querySelectorAll(".card"), snap);
     restoreFocus(document, focus);
   } catch (e) {
-    document.getElementById("fleet-subtitle").innerHTML =
-      '<span class="err">render failed: ' + esc(e) + "</span>";
+    showError("render failed: " + esc(e));
     return;
   }
   setSubtitle(s);
@@ -59,28 +67,38 @@ if (servingEl) {
   });
 }
 
+async function loadStatus(signal) {
+  const response = await fetch("/api/status", { signal });
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  return response.json();
+}
+
+function applyStatus(token, data) {
+  if (!gate.isCurrent(token)) return false;
+  lastStatus = data;
+  lastGoodAt = Date.now() / 1000;
+  pollError = null;
+  return true;
+}
+
+function applyPollError(token, e) {
+  if (e.name === "AbortError" || !gate.isCurrent(token)) return false;
+  pollError = e;
+  if (lastStatus) return true;
+  showError("status unavailable: " + esc(e));
+  return false;
+}
+
 async function refresh() {
   const token = gate.begin();
   if (inflight) inflight.abort();
   const ac = new AbortController();
   inflight = ac;
   try {
-    const response = await fetch("/api/status", { signal: ac.signal });
-    if (!response.ok) throw new Error("HTTP " + response.status);
-    const data = await response.json();
-    if (!gate.isCurrent(token)) return;
-    lastStatus = data;
-    lastGoodAt = Date.now() / 1000;
-    pollError = null;
+    const data = await loadStatus(ac.signal);
+    if (!applyStatus(token, data)) return;
   } catch (e) {
-    if (e.name === "AbortError") return;
-    if (!gate.isCurrent(token)) return;
-    pollError = e;
-    if (!lastStatus) {
-      document.getElementById("fleet-subtitle").innerHTML =
-        '<span class="err">status unavailable: ' + esc(e) + "</span>";
-      return;
-    }
+    if (!applyPollError(token, e)) return;
   }
   if (lastStatus) render(lastStatus);
 }

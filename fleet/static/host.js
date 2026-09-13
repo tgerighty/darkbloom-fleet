@@ -1,5 +1,5 @@
 import { esc } from "./ui.js?v=4";
-export { esc };
+export { esc } from "./ui.js?v=4";
 
 const TD = "</td><td>";
 const TR = "<tr><td>";
@@ -46,7 +46,7 @@ function tri(v) {
   return v ? "yes" : "–";
 }
 export function actionLabel(decision, mode) {
-  if (!decision || !decision.action) return "";
+  if (!decision?.action) return "";
   const switchLike = decision.action === "SWITCH" || decision.action === "SWITCH_WHEN_IDLE";
   if (String(mode || "").toUpperCase() === "OBSERVE" && switchLike && !decision.executed) {
     return "would switch";
@@ -65,7 +65,7 @@ function decisionBlock(s) {
 }
 
 export function bandHtml(s, card) {
-  const b = (card && card.status) || { state: "OFF", tone: "grey", detail: "" };
+  const b = card?.status || { state: "OFF", tone: "grey", detail: "" };
   const model = s.current_model || "no model";
   const busy = s.inference_active ? "serving" : "idle";
   return '<div class="band ' + (b.tone || "grey") + '"><div class="band-line"><span>' +
@@ -75,7 +75,7 @@ export function bandHtml(s, card) {
 }
 
 function loadErrorBlock(card) {
-  const err = card && card.last_model_load_error;
+  const err = card?.last_model_load_error;
   if (!err) return "";
   const when = err.at ? " (" + fmtAge(err.at) + ")" : "";
   const model = err.model ? esc(err.model) + ": " : "";
@@ -256,31 +256,39 @@ function headHtml(s, host) {
 }
 
 export function errorCard(s, err) {
-  const host = (s && s.host) || {};
+  const host = s?.host || {};
   const label = host.label || "host";
-  const text = (s && s.error) || (err && (err.message || String(err))) || "error";
+  const text = s?.error || (err && (err.message || String(err))) || "error";
   return '<div class="card off" data-host="' + esc(label) + '">' +
     '<div class="card-head"><h1>' + esc(label) + "</h1></div>" +
     '<div class="band red"><div class="band-line"><span>OFF — host error</span></div>' +
     '<div class="band-sub err">' + esc(text) + "</div></div></div>";
 }
 
-export function renderHost(s, servingWindow, hourlyHtml) {
-  if (s && s.error && !s.card) return errorCard(s, s.error);
+function hostCard(s) {
   const card = s.card || EMPTY_CARD;
   const host = s.host || { label: "host", spec: "" };
-  const state = (card.status && card.status.state) || "OFF";
   const loaded = (card.loaded || []).map(function (c) {
     return chip(c.model, s.current_model, s.inference_active);
   });
-  return '<div class="card ' + state.toLowerCase() + '" data-host="' + esc(host.label) + '">' +
-    headHtml(s, host) + bandHtml(s, card) +
-    '<div class="card-body">' + resourceRow(card) + gpuRow(card.gpu) +
-    chipRow("loaded", loaded) + kpiGrid(s, card) +
-    servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
+  return { card: card, host: host, loaded: loaded, cls: (card.status?.state || "OFF").toLowerCase() };
+}
+
+function hostFolds(s, card, servingWindow, hourlyHtml) {
+  return servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
     slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
     decisionsSection(s.recent_decisions || [], s.mode) +
-    payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0) + DIV_END;
+    payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0);
+}
+
+export function renderHost(s, servingWindow, hourlyHtml) {
+  if (s?.error && !s.card) return errorCard(s, s.error);
+  const p = hostCard(s);
+  return '<div class="card ' + p.cls + '" data-host="' + esc(p.host.label) + '">' +
+    headHtml(s, p.host) + bandHtml(s, p.card) +
+    '<div class="card-body">' + resourceRow(p.card) + gpuRow(p.card.gpu) +
+    chipRow("loaded", p.loaded) + kpiGrid(s, p.card) +
+    hostFolds(s, p.card, servingWindow, hourlyHtml) + DIV_END;
 }
 
 export function renderHosts(hosts, servingWindow, hourlyFn) {

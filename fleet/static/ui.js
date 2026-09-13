@@ -1,5 +1,8 @@
 const TD = "</td><td>";
 const TR = "<tr><td>";
+const FOLD_SEL = "details[data-fold]";
+const SCROLL_SEL = "[data-scroll]";
+const SERVING_WINDOW_ID = "serving-window";
 
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" };
 export function esc(v) {
@@ -19,9 +22,9 @@ export function mergeDemand(hosts) {
 }
 
 export function renderDemand(rows, hosts) {
-  if (!rows || !rows.length) return '<tr><td colspan="7"><i>no demand samples yet</i></td></tr>';
+  if (!rows?.length) return '<tr><td colspan="7"><i>no demand samples yet</i></td></tr>';
   const current = (hosts || []).map(function (h) {
-    return { model: h.current_model, label: (h.host || {}).label };
+    return { model: h.current_model, label: h.host?.label };
   }).filter(function (c) { return c.model && c.label; });
   return rows.map(function (r) {
     const marks = current.filter(function (c) { return c.model === r.model; })
@@ -36,14 +39,14 @@ export function renderDemand(rows, hosts) {
 export function captureUiState(cardEls) {
   return Array.from(cardEls).map(function (el) {
     const open = [];
-    el.querySelectorAll("details[data-fold]").forEach(function (d) {
-      if (d.open) open.push(d.getAttribute("data-fold"));
+    el.querySelectorAll(FOLD_SEL).forEach(function (d) {
+      if (d.open) open.push(d.dataset.fold);
     });
     const scrolls = {};
-    el.querySelectorAll("[data-scroll]").forEach(function (n) {
-      scrolls[n.getAttribute("data-scroll")] = n.scrollTop;
+    el.querySelectorAll(SCROLL_SEL).forEach(function (n) {
+      scrolls[n.dataset.scroll] = n.scrollTop;
     });
-    return { host: el.getAttribute("data-host"), open: open, scrolls: scrolls };
+    return { host: el.dataset.host, open: open, scrolls: scrolls };
   });
 }
 
@@ -51,55 +54,77 @@ export function restoreUiState(cardEls, snap) {
   const byHost = {};
   (snap || []).forEach(function (s) { byHost[s.host] = s; });
   Array.from(cardEls).forEach(function (el) {
-    const st = byHost[el.getAttribute("data-host")];
+    const st = byHost[el.dataset.host];
     if (!st) return;
-    el.querySelectorAll("details[data-fold]").forEach(function (d) {
-      d.open = st.open.indexOf(d.getAttribute("data-fold")) !== -1;
+    el.querySelectorAll(FOLD_SEL).forEach(function (d) {
+      d.open = st.open.includes(d.dataset.fold);
     });
-    el.querySelectorAll("[data-scroll]").forEach(function (n) {
-      const k = n.getAttribute("data-scroll");
+    el.querySelectorAll(SCROLL_SEL).forEach(function (n) {
+      const k = n.dataset.scroll;
       if (st.scrolls[k] !== undefined) n.scrollTop = st.scrolls[k];
     });
   });
 }
 
+function closest(el, sel) {
+  return typeof el.closest === "function" ? el.closest(sel) : null;
+}
+
+function outsideHosts(active, hostsRoot) {
+  return hostsRoot && typeof hostsRoot.contains === "function" && !hostsRoot.contains(active);
+}
+
 export function captureFocus(active, hostsRoot) {
   if (!active) return null;
-  if (active.id === "serving-window") return { id: "serving-window" };
-  if (hostsRoot && typeof hostsRoot.contains === "function" && !hostsRoot.contains(active)) return null;
-  const card = typeof active.closest === "function" ? active.closest(".card") : null;
-  const fold = typeof active.closest === "function" ? active.closest("details[data-fold]") : null;
+  if (active.id === SERVING_WINDOW_ID) return { id: SERVING_WINDOW_ID };
+  if (outsideHosts(active, hostsRoot)) return null;
+  const card = closest(active, ".card");
+  const fold = closest(active, FOLD_SEL);
   return {
-    host: card ? card.getAttribute("data-host") : null,
+    host: card?.dataset.host ?? null,
     id: active.id || "",
-    fold: fold ? fold.getAttribute("data-fold") : "",
+    fold: fold?.dataset.fold || "",
     tag: active.tagName || "",
   };
 }
 
 function cardByHost(root, host) {
-  const cards = root.querySelectorAll ? root.querySelectorAll(".card") : [];
-  for (let i = 0; i < cards.length; i++) {
-    if (cards[i].getAttribute("data-host") === host) return cards[i];
+  const cards = root.querySelectorAll?.(".card") || [];
+  for (const card of cards) {
+    if (card.dataset.host === host) return card;
+  }
+  return null;
+}
+
+function query(root, sel) {
+  return root?.querySelector?.(sel) || null;
+}
+
+function focusEl(el) {
+  el?.focus?.();
+}
+
+function restoreServingFocus(doc) {
+  focusEl(doc.getElementById(SERVING_WINDOW_ID));
+}
+
+function elementToFocus(doc, snap) {
+  const root = (snap.host ? cardByHost(doc, snap.host) : null) || doc;
+  const byId = snap.id ? query(root, "#" + snap.id) : null;
+  if (byId) return byId;
+  if (snap.fold && snap.tag === "SUMMARY") {
+    return query(query(root, 'details[data-fold="' + snap.fold + '"]'), "summary");
   }
   return null;
 }
 
 export function restoreFocus(doc, snap) {
   if (!snap || !doc) return;
-  if (snap.id === "serving-window" && doc.getElementById) {
-    const serving = doc.getElementById("serving-window");
-    if (serving && serving.focus) serving.focus();
+  if (snap.id === SERVING_WINDOW_ID && doc.getElementById) {
+    restoreServingFocus(doc);
     return;
   }
-  const card = snap.host ? cardByHost(doc, snap.host) : null;
-  const root = card || doc;
-  let el = snap.id && root.querySelector ? root.querySelector("#" + snap.id) : null;
-  if (!el && snap.fold && snap.tag === "SUMMARY" && root.querySelector) {
-    const details = root.querySelector('details[data-fold="' + snap.fold + '"]');
-    el = details && details.querySelector ? details.querySelector("summary") : null;
-  }
-  if (el && el.focus) el.focus();
+  focusEl(elementToFocus(doc, snap));
 }
 
 export function makeRefreshGate() {

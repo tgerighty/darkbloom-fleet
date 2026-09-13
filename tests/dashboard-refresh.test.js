@@ -7,20 +7,20 @@ import {
 function details(fold, open) {
   return {
     open: open,
-    getAttribute: function (name) { return name === "data-fold" ? fold : null; },
+    dataset: { fold: fold },
   };
 }
 
 function scroll(key, top) {
   return {
     scrollTop: top,
-    getAttribute: function (name) { return name === "data-scroll" ? key : null; },
+    dataset: { scroll: key },
   };
 }
 
 function cardEl(host, folds, scrolls) {
   return {
-    getAttribute: function (name) { return name === "data-host" ? host : null; },
+    dataset: { host: host },
     querySelectorAll: function (sel) {
       if (sel === "details[data-fold]") return folds;
       if (sel === "[data-scroll]") return scrolls;
@@ -58,11 +58,11 @@ describe("refresh UI snapshot", function () {
   it("restores summary focus inside a card", function () {
     const summary = { tagName: "SUMMARY", focus: function () { this.focused = true; } };
     const foldEl = {
-      getAttribute: function (name) { return name === "data-fold" ? "trust" : null; },
+      dataset: { fold: "trust" },
       querySelector: function (sel) { return sel === "summary" ? summary : null; },
     };
     const card = {
-      getAttribute: function (name) { return name === "data-host" ? "M3" : null; },
+      dataset: { host: "M3" },
       querySelector: function (sel) { return String(sel).indexOf("trust") !== -1 ? foldEl : null; },
     };
     const active = {
