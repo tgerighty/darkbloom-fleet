@@ -27,6 +27,13 @@ def test_last_served_per_model(fake_pool):
     assert routability.last_served(pool, "h") == {"a": 500.0, "b": 900.0}
 
 
+def test_last_served_counts_the_first_snapshot_of_a_session(fake_pool):
+    pool = fake_pool([{"model": "a", "t": 100.0}])
+    assert routability.last_served(pool, "h") == {"a": 100.0}
+    sql = " ".join(pool.calls[0][0].split())
+    assert "coalesce(lag(requests_served) OVER (PARTITION BY started_at ORDER BY observed_at), 0)" in sql
+
+
 def test_measured_switch_cost_is_the_median_over_serving_sessions(fake_pool):
     assert routability.measured_switch_cost(fake_pool([{"median": 312.4, "n": 7}]), "h") == (312.4, 7)
 
@@ -64,6 +71,15 @@ def test_the_panel_without_a_daemon_snapshot(fake_pool):
     assert panel == {"self_route_as_of": None, "trust_level": None, "trust_reason": None, "last_served_at": None,
                      "models": [], "session": None,
                      "switch_cost": {"configured_seconds": 300.0, "measured_seconds": None, "measured_sessions": 0}}
+
+
+def test_the_panel_hides_measured_cost_until_the_switcher_sample_count(fake_pool):
+    two = routability.routability_panel(
+        fake_pool([{"t": None}], [], [{"median": 400.0, "n": 2}]), "h", None, 300.0)
+    assert two["switch_cost"] == {"configured_seconds": 300.0, "measured_seconds": None, "measured_sessions": 2}
+    three = routability.routability_panel(
+        fake_pool([{"t": None}], [], [{"median": 400.0, "n": 3}]), "h", None, 300.0)
+    assert three["switch_cost"] == {"configured_seconds": 300.0, "measured_seconds": 400.0, "measured_sessions": 3}
 
 
 def test_an_ambiguous_alias_keeps_the_coordinator_row():

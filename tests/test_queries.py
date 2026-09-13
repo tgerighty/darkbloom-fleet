@@ -4,8 +4,8 @@ from fleet import queries
 from fleet.queries import _serving_shares
 
 
-def _snap(t: float, model: str | None, *, active: bool = True) -> dict:
-    return {"observed_at": t, "current_model": model, "inference_active": active}
+def _snap(t: float, model: str | None, *, active: bool = True, fresh: bool = True) -> dict:
+    return {"observed_at": t, "current_model": model, "inference_active": active, "fresh": fresh}
 
 
 def _clock(monkeypatch, now: float) -> None:
@@ -43,6 +43,17 @@ def test_an_empty_window_has_no_shares():
     assert _serving_shares([], since=1000, now=1000) == {}
 
 
+def test_snapshots_with_fresh_false_do_not_count_as_serving():
+    snaps = [_snap(0, "a", fresh=False), _snap(60, "a", fresh=False), _snap(120, "a", fresh=False)]
+    assert _serving_shares(snaps, since=0, now=180) == {"idle": 100.0}
+
+
+def test_a_stale_snapshot_does_not_hold_inference_active():
+    shares = _serving_shares(
+        [_snap(0, "a"), _snap(60, "a", fresh=False), _snap(120, "a")], since=0, now=180)
+    assert shares == {"a": 66.7, "idle": 33.3}
+
+
 def test_latest_demand_table_orders_by_smoothed_score(fake_pool):
     pool = fake_pool([{"model": "a", "ema_score": 0.1}, {"model": "b", "ema_score": 0.3}, {"model": "c", "ema_score": None}])
     assert [row["model"] for row in queries.latest_demand_table(pool, "h")] == ["b", "a", "c"]
@@ -59,6 +70,13 @@ def test_lifetime_serving_starts_at_the_first_snapshot(fake_pool, monkeypatch):
     pool = fake_pool([{"t": 1000.0}], [], [_snap(1000.0, "a")])
     assert queries.serving_percentage(pool, "h", None) == {"a": 100.0, "idle": 0.0}
     assert queries.serving_percentage(fake_pool([{"t": None}]), "h", None) == {}
+
+
+def test_serving_percentage_treats_unfresh_snapshots_as_idle(fake_pool, monkeypatch):
+    _clock(monkeypatch, 180.0)
+    pool = fake_pool([_snap(0.0, "a", fresh=False)], [_snap(60.0, "a", fresh=False), _snap(120.0, "a", fresh=False)])
+    assert queries.serving_percentage(pool, "h", 180.0) == {"idle": 100.0}
+    assert all("fresh" in sql for sql, _params in pool.calls)
 
 
 def _status_responses(daemon, demand, decisions, votes=(), card_totals=None, hourly=None):

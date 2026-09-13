@@ -77,16 +77,17 @@ def recent_earnings(pool: ConnectionPool, host: str, hashes: list[str], limit: i
 
 def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
     """Percentage of the window each model was actively serving a request,
-    plus "idle" for the rest: warm but not serving, no model, or no snapshot.
-    Each snapshot's inference_active holds until the next one (the last until
-    now), counted only inside the window; a gap longer than
-    OUTAGE_GAP_SECONDS is an outage and counts as idle. Snapshots are a minute
-    apart, so requests shorter than that are under-counted."""
+    plus "idle" for the rest: warm but not serving, no model, no snapshot, or
+    a snapshot with fresh=false. Each fresh snapshot's inference_active holds
+    until the next one (the last until now), counted only inside the window;
+    a gap longer than OUTAGE_GAP_SECONDS is an outage and counts as idle.
+    Snapshots are a minute apart, so requests shorter than that are under-counted."""
     points = [*snapshots, {"observed_at": now, "current_model": None, "inference_active": False}]
     totals: dict[str, float] = {}
     for prev, nxt in pairwise(points):
         model = prev["current_model"]
-        if model and prev.get("inference_active") and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS:
+        if (model and prev.get("inference_active") and prev.get("fresh", True)
+                and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS):
             held = nxt["observed_at"] - max(prev["observed_at"], since)
             totals[model] = totals.get(model, 0.0) + held
     window = now - since
@@ -112,12 +113,12 @@ def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float | 
     since = now - window_seconds
     with pool.connection() as conn:
         before = conn.execute(
-            "SELECT observed_at, current_model, inference_active FROM daemon_snapshots "
+            "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
             "WHERE host = %s AND observed_at <= %s ORDER BY observed_at DESC LIMIT 1",
             (host, since),
         ).fetchone()
         rows = conn.execute(
-            "SELECT observed_at, current_model, inference_active FROM daemon_snapshots "
+            "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
             "WHERE host = %s AND observed_at > %s ORDER BY observed_at",
             (host, since),
         ).fetchall()

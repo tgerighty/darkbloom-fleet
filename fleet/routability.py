@@ -9,6 +9,7 @@ from __future__ import annotations
 from psycopg_pool import ConnectionPool
 
 Row = dict[str, object]
+MIN_SWITCH_COST_SESSIONS = 3
 
 
 def latest_self_route(pool: ConnectionPool) -> tuple[float | None, dict[str, int]]:
@@ -55,12 +56,13 @@ def session_timing(pool: ConnectionPool, host: str, started_at: float) -> Row:
 def last_served(pool: ConnectionPool, host: str) -> dict[str, float]:
     """When each model last served on this host: the latest snapshot whose
     request counter rose since the previous one in the same daemon session.
-    current_model is the most recently used model, so it names the server."""
+    The first snapshot of a session counts as a rise when requests_served > 0
+    (lag is 0). current_model names the server."""
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT current_model AS model, max(observed_at) AS t FROM ("
             "  SELECT observed_at, current_model, requests_served"
-            "    - lag(requests_served) OVER (PARTITION BY started_at ORDER BY observed_at) AS delta"
+            "    - coalesce(lag(requests_served) OVER (PARTITION BY started_at ORDER BY observed_at), 0) AS delta"
             "  FROM daemon_snapshots WHERE host = %s) d "
             "WHERE delta > 0 AND current_model IS NOT NULL GROUP BY current_model",
             (host,),
@@ -107,13 +109,18 @@ def _switch_cost_sessions(pool: ConnectionPool, host: str) -> tuple[float | None
     return median, int(row["n"]) if row else 0
 
 
+def _usable_measured_cost(median: float | None, n: int) -> float | None:
+    return median if median is not None and n >= MIN_SWITCH_COST_SESSIONS else None
+
+
 def measured_switch_cost(pool: ConnectionPool, host: str) -> tuple[float, int] | None:
     """The measured post-restart penalty the switch-cost guardrail uses in
     place of the fixed DARKBLOOM_SWITCH_COST_SECONDS estimate: (median
     seconds, session count), or None until 3 sessions have served a request —
     fewer would make the median noise."""
     median, n = _switch_cost_sessions(pool, host)
-    return (median, n) if median is not None and n >= 3 else None
+    seconds = _usable_measured_cost(median, n)
+    return (seconds, n) if seconds is not None else None
 
 
 def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switch_cost_seconds: float) -> Row:
@@ -125,6 +132,7 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switc
     counts = _aliased_counts(counts, advertised | warm)
     started_at = float(snapshot.get("started_at") or 0)
     median, n = _switch_cost_sessions(pool, host)
+    measured = _usable_measured_cost(median, n)
     return {
         "self_route_as_of": as_of,
         # The coordinator only routes to hardware-trusted providers; after a
@@ -140,5 +148,5 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switc
         ],
         "session": session_timing(pool, host, started_at) if started_at else None,
         "switch_cost": {"configured_seconds": switch_cost_seconds,
-                        "measured_seconds": median, "measured_sessions": n},
+                        "measured_seconds": measured, "measured_sessions": n},
     }
