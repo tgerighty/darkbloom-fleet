@@ -8,7 +8,7 @@ from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
 
-from .attribution import provider_hosts, unattributed_recent
+from .attribution import provider_hosts, unattributed_recent, unique_payouts_sql
 from .card import build_card
 from .config import Config
 from .hourly import hourly_jobs
@@ -42,16 +42,19 @@ def latest_daemon(pool: ConnectionPool, host: str) -> Row | None:
         ).fetchone()
 
 
-def earnings_usd(pool: ConnectionPool, host: str, since: float, hashes: list[str]) -> float:
+_EARNINGS_SUM_SQL = (
+    "SELECT coalesce(sum(micro_usd), 0) AS total FROM ("
+    + unique_payouts_sql("micro_usd", "created_at > %s AND created_at <= %s AND provider_hash = ANY(%s)")
+    + ") unique_payouts"
+)
+
+
+def earnings_usd(pool: ConnectionPool, since: float, now: float, hashes: list[str]) -> float:
     """Only payouts whose provider session is attributed to this host; the
-    ledger is account-wide, so the host column alone would count the other
-    machines' money too (see attribution.py)."""
+    ledger is account-wide, so the ingest host column is not ownership
+    (see attribution.py). Replicated copies share payout_rowid."""
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT coalesce(sum(micro_usd), 0) AS total FROM earnings "
-            "WHERE host = %s AND created_at > %s AND provider_hash = ANY(%s)",
-            (host, since, hashes),
-        ).fetchone()
+        row = conn.execute(_EARNINGS_SUM_SQL, (since, now, hashes)).fetchone()
     return float(row["total"]) / 1_000_000
 
 
@@ -64,15 +67,21 @@ def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[R
         ).fetchall()
 
 
-def recent_earnings(pool: ConnectionPool, host: str, hashes: list[str], limit: int = 50) -> list[Row]:
-    """Latest payouts attributed to this host by provider session (the ledger
-    copy itself is account-wide — see attribution.py)."""
+_RECENT_SQL = (
+    "SELECT created_at, model, completion_tokens, micro_usd FROM ("
+    + unique_payouts_sql(
+        "created_at, model, completion_tokens, micro_usd",
+        "created_at <= %s AND provider_hash = ANY(%s)",
+    )
+    + ") unique_payouts ORDER BY created_at DESC LIMIT %s"
+)
+
+
+def recent_earnings(pool: ConnectionPool, now: float, hashes: list[str], limit: int = 50) -> list[Row]:
+    """Latest unique payouts attributed to this host by provider session
+    (the ledger copy itself is account-wide — see attribution.py)."""
     with pool.connection() as conn:
-        return conn.execute(
-            "SELECT created_at, model, completion_tokens, micro_usd FROM earnings "
-            "WHERE host = %s AND provider_hash = ANY(%s) ORDER BY created_at DESC LIMIT %s",
-            (host, hashes, limit),
-        ).fetchall()
+        return conn.execute(_RECENT_SQL, (now, hashes, limit)).fetchall()
 
 
 def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
@@ -141,13 +150,13 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "inference_active": daemon["inference_active"] if daemon else None,
         "as_of": daemon["observed_at"] if daemon else None,
         "demand": demand,
-        "earnings_usd_24h": round(earnings_usd(pool, host, now - DAY_SECONDS, hashes), 4),
-        "earnings_usd_1h": round(earnings_usd(pool, host, now - 3600, hashes), 4),
+        "earnings_usd_24h": round(earnings_usd(pool, now - DAY_SECONDS, now, hashes), 4),
+        "earnings_usd_1h": round(earnings_usd(pool, now - 3600, now, hashes), 4),
         "serving": {name: serving_percentage(pool, host, seconds) for name, seconds in SERVING_WINDOWS.items()},
         "recent_decisions": recent_decisions(pool, host, limit=50),
-        "recent_earnings": recent_earnings(pool, host, hashes),
-        "unattributed_recent": unattributed_recent(pool, host, attributed),
+        "recent_earnings": recent_earnings(pool, now, hashes),
+        "unattributed_recent": unattributed_recent(pool, attributed, now),
         "routability": routability,
         "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now),
-        "hourly_jobs": hourly_jobs(pool, host, hashes, now),
+        "hourly_jobs": hourly_jobs(pool, hashes, now),
     }

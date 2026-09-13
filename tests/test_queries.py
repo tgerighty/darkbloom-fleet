@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from fleet import queries
+from fleet import attribution, queries
 from fleet.queries import _serving_shares
 
 
@@ -96,7 +96,9 @@ def _status_responses(daemon, demand, decisions, votes=(), card_totals=None, hou
 def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_990.0}
-    votes = [{"provider_hash": "s1", "host": "m3", "votes": 2}, {"provider_hash": "s2", "host": "other", "votes": 9}]
+    votes = [{"payout_rowid": 1, "provider_hash": "s1", "host": "m3"},
+             {"payout_rowid": 2, "provider_hash": "s1", "host": "m3"},
+             {"payout_rowid": 3, "provider_hash": "s2", "host": "other"}]
     hourly = [{"hour": 7_200.0, "portion": 0, "model": "a", "n": 2}]
     pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}], [{"action": "KEEP"}], votes,
                                         hourly=hourly))
@@ -119,20 +121,49 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert status["unattributed_recent"] == 2
     assert status["card"]["status"]["state"] == "ATTESTING"  # no trust level on the snapshot
     assert status["card"]["kpis"]["tokens"] == 4_000 and status["card"]["kpis"]["token_requests"] == 2
-    # Only this host's provider sessions count as its money.
+    # Hash ownership, not ingest host; current totals stop at now.
     earnings_calls = [params for sql, params in pool.calls if "sum(micro_usd)" in sql]
-    assert earnings_calls == [("m3", 10_000.0 - 86_400, ["s1"]), ("m3", 10_000.0 - 3_600, ["s1"])]
+    assert earnings_calls == [(10_000.0 - 86_400, 10_000.0, ["s1"]), (10_000.0 - 3_600, 10_000.0, ["s1"])]
     assert status["routability"] == {"self_route_as_of": None, "trust_level": None, "trust_reason": None,
                                      "last_served_at": None, "models": [], "session": None,
                                      "switch_cost": {"configured_seconds": 300.0, "measured_seconds": None,
                                                      "measured_sessions": 0}}
 
 
-def test_earnings_queries_pass_the_attribution_filter_through(fake_pool):
+def _assert_unique_hash_owned_sql(sql: str) -> None:
+    assert "DISTINCT ON (payout_rowid)" in sql
+    assert "host = %s" not in sql
+    assert "created_at <= %s" in sql
+    assert "provider_hash = ANY(%s)" in sql
+
+
+def test_earnings_follow_hash_ownership_and_unique_payouts(fake_pool):
     pool = fake_pool([{"total": 1_000_000}], [])
-    assert queries.earnings_usd(pool, "h", 0.0, ["s1"]) == 1.0
-    assert queries.recent_earnings(pool, "h", ["s1"]) == []
-    assert [params for _sql, params in pool.calls] == [("h", 0.0, ["s1"]), ("h", ["s1"], 50)]
+    assert queries.earnings_usd(pool, 0.0, 100.0, ["s1"]) == 1.0
+    assert queries.recent_earnings(pool, 100.0, ["s1"]) == []
+    sum_sql, sum_params = pool.calls[0]
+    recent_sql, recent_params = pool.calls[1]
+    _assert_unique_hash_owned_sql(sum_sql)
+    _assert_unique_hash_owned_sql(recent_sql)
+    assert sum_params == (0.0, 100.0, ["s1"])
+    assert recent_params == (100.0, ["s1"], 50)
+
+
+def test_recent_and_unattributed_share_unique_ledger_rows(fake_pool):
+    pool = fake_pool(
+        [{"created_at": 9.0, "model": "a", "completion_tokens": 1, "micro_usd": 2}],
+        [{"provider_hash": None}, {"provider_hash": "s1"}],
+    )
+    rows = queries.recent_earnings(pool, 10.0, ["s1"])
+    unattributed = attribution.unattributed_recent(pool, {"s1": "mac1"}, now=10.0)
+    assert rows == [{"created_at": 9.0, "model": "a", "completion_tokens": 1, "micro_usd": 2}]
+    assert unattributed == 1
+    recent_sql, recent_params = pool.calls[0]
+    unattr_sql, unattr_params = pool.calls[1]
+    assert "DISTINCT ON (payout_rowid)" in recent_sql and "DISTINCT ON (payout_rowid)" in unattr_sql
+    assert "host = %s" not in recent_sql and "host = %s" not in unattr_sql
+    assert recent_params == (10.0, ["s1"], 50)
+    assert unattr_params == (10.0, 50)
 
 
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):

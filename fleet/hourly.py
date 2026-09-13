@@ -6,6 +6,8 @@ from collections import Counter
 
 from psycopg_pool import ConnectionPool
 
+from .attribution import unique_payouts_sql
+
 Row = dict[str, object]
 
 HOUR_SECONDS = 3_600
@@ -21,9 +23,12 @@ OVERFLOW = "?"
 _HOURLY_SQL = (
     "SELECT floor(created_at/3600)*3600 AS hour, "
     f"floor((created_at-floor(created_at/3600)*3600)/{PORTION_SECONDS}) AS portion, "
-    "model, count(*) AS n FROM earnings "
-    "WHERE host = %s AND created_at >= %s AND created_at <= %s AND provider_hash = ANY(%s) "
-    "GROUP BY 1,2,3 ORDER BY 1 DESC"
+    "model, count(*) AS n FROM ("
+    + unique_payouts_sql(
+        "created_at, model",
+        "created_at >= %s AND created_at <= %s AND provider_hash = ANY(%s)",
+    )
+    + ") unique_payouts GROUP BY 1,2,3 ORDER BY 1 DESC"
 )
 
 
@@ -66,12 +71,12 @@ def _hour_rows(hours: range, newest: int, now: float, buckets: dict[int, dict[st
     return output
 
 
-def hourly_jobs(pool: ConnectionPool, host: str, hashes: list[str], now: float) -> Row:
+def hourly_jobs(pool: ConnectionPool, hashes: list[str], now: float) -> Row:
     """Return one model letter or idle dot for each elapsed hour portion."""
     newest = int(now // HOUR_SECONDS) * HOUR_SECONDS
     hours = range(newest, newest - BUCKETS * HOUR_SECONDS, -HOUR_SECONDS)
     with pool.connection() as conn:
-        rows = conn.execute(_HOURLY_SQL, (host, hours[-1], now, hashes)).fetchall()
+        rows = conn.execute(_HOURLY_SQL, (hours[-1], now, hashes)).fetchall()
     buckets: dict[int, dict[str, int]] = {hour: {} for hour in hours}
     portions: dict[int, list[Counter[str]]] = {
         hour: [Counter() for _ in range(PORTIONS)] for hour in hours

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from psycopg_pool import ConnectionPool
 
+from .attribution import unique_payouts_sql
+
 Row = dict[str, object]
 
 # darkbloom.dev shows "receiving traffic" while a request landed in the last
@@ -63,15 +65,21 @@ def _loaded(snapshot: Row) -> list[Row]:
     return [{"model": m, "active": busy and m == current} for m in (snapshot.get("warm_models") or [])]
 
 
-def session_totals(pool: ConnectionPool, host: str, since: float, hashes: list[str]) -> Row:
-    """Tokens paid out and payout-row count for this host's attributed
+_SESSION_TOTALS_SQL = (
+    "SELECT coalesce(sum(completion_tokens), 0) AS tokens, count(*) AS requests FROM ("
+    + unique_payouts_sql(
+        "completion_tokens",
+        "created_at > %s AND created_at <= %s AND provider_hash = ANY(%s)",
+    )
+    + ") unique_payouts"
+)
+
+
+def session_totals(pool: ConnectionPool, since: float, now: float, hashes: list[str]) -> Row:
+    """Tokens paid out and unique payout-row count for this host's attributed
     sessions since `since` — the TOKENS tile's value and its "n reqs" sub."""
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT coalesce(sum(completion_tokens), 0) AS tokens, count(*) AS requests FROM earnings "
-            "WHERE host = %s AND created_at > %s AND provider_hash = ANY(%s)",
-            (host, since, hashes),
-        ).fetchone()
+        row = conn.execute(_SESSION_TOTALS_SQL, (since, now, hashes)).fetchone()
     return {"tokens": int(row["tokens"]), "requests": int(row["requests"])}
 
 
@@ -79,7 +87,7 @@ def build_card(pool: ConnectionPool, host: str, daemon: Row | None,
                last_served_at: float | None, hashes: list[str], now: float) -> Row:
     snapshot = daemon or {}
     started_at = float(snapshot.get("started_at") or 0)
-    totals = session_totals(pool, host, started_at, hashes)
+    totals = session_totals(pool, started_at, now, hashes)
     return {
         "status": _status_band(snapshot, last_served_at, now),
         "resources": {"thermal_state": snapshot.get("thermal_state"),

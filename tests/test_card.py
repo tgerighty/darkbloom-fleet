@@ -73,11 +73,11 @@ def test_the_card_assembles_resources_kpis_and_slots(fake_pool):
                              "started_at": 100.0, "last_served_at": 9_950.0}
 
 
-def test_session_totals_filters_by_host_window_and_attributed_sessions(fake_pool):
+def test_session_totals_filters_by_window_and_attributed_sessions(fake_pool):
     pool = fake_pool([{"tokens": 4_000, "requests": 7}])
-    assert card.session_totals(pool, "h", 100.0, ["s1"]) == {"tokens": 4_000, "requests": 7}
-    assert pool.calls == [
-        (("SELECT coalesce(sum(completion_tokens), 0) AS tokens, count(*) AS requests FROM earnings "
-          "WHERE host = %s AND created_at > %s AND provider_hash = ANY(%s)"),
-         ("h", 100.0, ["s1"])),
-    ]
+    assert card.session_totals(pool, 100.0, 1_000.0, ["s1"]) == {"tokens": 4_000, "requests": 7}
+    sql, params = pool.calls[0]
+    assert "DISTINCT ON (payout_rowid)" in sql
+    assert "host = %s" not in sql
+    assert "created_at <= %s" in sql
+    assert params == (100.0, 1_000.0, ["s1"])
