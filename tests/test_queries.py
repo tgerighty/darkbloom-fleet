@@ -92,7 +92,8 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
     hourly_jobs = status["hourly_jobs"]
-    assert hourly_jobs["legend"] == [{"letter": "A", "model": "a"}] and hourly_jobs["range_share"] == {"a": 100}
+    assert hourly_jobs["legend"] == [{"letter": "A", "model": "a"}]
+    assert hourly_jobs["range_share"] == {"a": 100}
     assert len(hourly_jobs["rows"]) == 24
     assert hourly_jobs["rows"][0] == {"hour": 7_200, "jobs": 2, "counts": {"a": 2}}
     assert hourly_jobs["rows"][1] == {"hour": 3_600, "jobs": 0, "counts": {}}
