@@ -123,8 +123,9 @@ def measured_switch_cost(pool: ConnectionPool, host: str) -> tuple[float, int] |
     return (seconds, n) if seconds is not None else None
 
 
-def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switch_cost_seconds: float) -> Row:
-    as_of, counts = latest_self_route(pool)
+def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switch_cost_seconds: float,
+                      self_route: tuple[float | None, dict[str, int]]) -> Row:
+    as_of, counts = self_route
     served = last_served(pool, host)
     snapshot = daemon or {}
     advertised = set(snapshot.get("advertised_models") or [])

@@ -3,7 +3,7 @@ the `host` column on an earnings row names only whose copy we read, not who
 served the request. A payout's provider_hash names the provider *session*
 that earned it; this module maps each hash to the host whose daemon actually
 served it, by watching each host's own request counter (daemon_snapshots).
-Recomputed on every build_status call — a handful of hashes a day, so no
+Recomputed once per /api/status request — a handful of hashes a day, so no
 caching table (see progress.md).
 """
 from __future__ import annotations

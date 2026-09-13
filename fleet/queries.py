@@ -12,7 +12,7 @@ from .attribution import provider_hosts, unattributed_recent, unique_payouts_sql
 from .card import build_card
 from .config import Config
 from .hourly import hourly_jobs
-from .routability import routability_panel
+from .routability import latest_self_route, routability_panel
 
 DAY_SECONDS = 86_400
 OUTAGE_GAP_SECONDS = 600
@@ -107,41 +107,53 @@ def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str,
     return shares
 
 
-def serving_percentage(pool: ConnectionPool, host: str, window_seconds: float | None) -> dict[str, float]:
-    """Share of the window each model was actively serving, including the
-    state already in force when the window opened. None = lifetime."""
-    now = time.time()
+def _window_shares(snapshots: list[Row], window_seconds: float | None, now: float) -> dict[str, float]:
+    """Reduce one ordered history to a window. None = since the first snapshot.
+    The latest row at or before `since` is the state already in force; later
+    rows fill the window. Every window of one status row uses the same `now`."""
     if window_seconds is None:
-        with pool.connection() as conn:
-            first = conn.execute(
-                "SELECT min(observed_at) AS t FROM daemon_snapshots WHERE host = %s", (host,)
-            ).fetchone()
-        if not first or first["t"] is None:
+        if not snapshots:
             return {}
-        window_seconds = now - float(first["t"])
-    since = now - window_seconds
+        since = min(float(row["observed_at"]) for row in snapshots)
+    else:
+        since = now - window_seconds
+    before = None
+    after: list[Row] = []
+    for snap in snapshots:
+        if snap["observed_at"] <= since:
+            before = snap
+        else:
+            after.append(snap)
+    return _serving_shares(([before] if before else []) + after, since, now)
+
+
+def serving_percentages(pool: ConnectionPool, host: str, now: float) -> dict[str, dict[str, float]]:
+    """Share of each dashboard window that each model was actively serving.
+    One history read; every window uses this `now` and the left-boundary state."""
     with pool.connection() as conn:
-        before = conn.execute(
+        snapshots = conn.execute(
             "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
-            "WHERE host = %s AND observed_at <= %s ORDER BY observed_at DESC LIMIT 1",
-            (host, since),
-        ).fetchone()
-        rows = conn.execute(
-            "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
-            "WHERE host = %s AND observed_at > %s ORDER BY observed_at",
-            (host, since),
+            "WHERE host = %s ORDER BY observed_at",
+            (host,),
         ).fetchall()
-    return _serving_shares(([before] if before else []) + rows, since, now)
+    return {name: _window_shares(snapshots, seconds, now) for name, seconds in SERVING_WINDOWS.items()}
 
 
-def build_status(cfg: Config, pool: ConnectionPool) -> Row:
+def shared_status_data(
+    pool: ConnectionPool,
+) -> tuple[dict[str, str], tuple[float | None, dict[str, int]]]:
+    """Account-wide maps shared by every host row of one /api/status."""
+    return provider_hosts(pool), latest_self_route(pool)
+
+
+def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
+                 self_route: tuple[float | None, dict[str, int]]) -> Row:
     host = cfg.host_id
     daemon = latest_daemon(pool, host)
     now = time.time()
     demand = latest_demand_table(pool, host)
-    attributed = provider_hosts(pool)
     hashes = [h for h, owner in attributed.items() if owner == host]
-    routability = routability_panel(pool, host, daemon, cfg.switch_cost_seconds)
+    routability = routability_panel(pool, host, daemon, cfg.switch_cost_seconds, self_route)
     return {
         "host": {"label": cfg.host_label, "spec": cfg.host_spec},
         "mode": "LIVE" if cfg.live_execution else "OBSERVE",
@@ -152,7 +164,7 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "demand": demand,
         "earnings_usd_24h": round(earnings_usd(pool, now - DAY_SECONDS, now, hashes), 4),
         "earnings_usd_1h": round(earnings_usd(pool, now - 3600, now, hashes), 4),
-        "serving": {name: serving_percentage(pool, host, seconds) for name, seconds in SERVING_WINDOWS.items()},
+        "serving": serving_percentages(pool, host, now),
         "recent_decisions": recent_decisions(pool, host, limit=50),
         "recent_earnings": recent_earnings(pool, now, hashes),
         "unattributed_recent": unattributed_recent(pool, attributed, now),

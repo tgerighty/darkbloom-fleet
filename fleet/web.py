@@ -62,7 +62,15 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     # validation model from the annotation.
     @app.get("/api/status", response_model=None)
     async def status() -> dict[str, list[queries.Row]]:
-        statuses = await asyncio.gather(*(asyncio.to_thread(_status_row, cfg, pool) for cfg in configs))
+        # Attribution and the self-route view are account-wide: query once,
+        # then every host row reads the same mapping.
+        try:
+            attributed, self_route = await asyncio.to_thread(queries.shared_status_data, pool)
+        except Exception as exc:
+            return {"hosts": [_error_host(cfg, exc) for cfg in configs]}
+        statuses = await asyncio.gather(
+            *(asyncio.to_thread(_status_row, cfg, pool, attributed, self_route) for cfg in configs)
+        )
         return {"hosts": list(statuses)}
 
     return app
@@ -87,8 +95,9 @@ def _error_host(cfg: Config, exc: BaseException) -> queries.Row:
     }
 
 
-def _status_row(cfg: Config, pool: ConnectionPool) -> queries.Row:
+def _status_row(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
+                self_route: tuple[float | None, dict[str, int]]) -> queries.Row:
     try:
-        return queries.build_status(cfg, pool)
+        return queries.build_status(cfg, pool, attributed, self_route)
     except Exception as exc:
         return _error_host(cfg, exc)

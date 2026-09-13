@@ -38,19 +38,45 @@ def test_static_modules_must_be_revalidated_on_every_load():
     assert response.headers["cache-control"] == "no-cache"
 
 
+def _patch_status(monkeypatch, build, shared=None):
+    monkeypatch.setattr(web.queries, "shared_status_data", shared or (lambda pool: ({}, (None, {}))))
+    monkeypatch.setattr(web.queries, "build_status", build)
+
+
 def test_status_returns_one_entry_per_host(monkeypatch):
-    monkeypatch.setattr(web.queries, "build_status", lambda cfg, pool: {"label": cfg.host_label})
+    _patch_status(monkeypatch, lambda cfg, pool, attributed, self_route: {"label": cfg.host_label})
     app = web.create_app((SimpleNamespace(host_label="m3"), SimpleNamespace(host_label="m1")), pool=None)
     assert asyncio.run(_route(app, "/api/status").endpoint()) == {"hosts": [{"label": "m3"}, {"label": "m1"}]}
 
 
+def test_status_computes_account_wide_data_once_and_passes_it_to_each_host(monkeypatch):
+    attributed = {"s1": "m3"}
+    self_route = (100.0, {"a": 1})
+    shared_calls = []
+    seen = []
+
+    def shared(pool):
+        shared_calls.append(pool)
+        return attributed, self_route
+
+    def build(cfg, pool, got_attr, got_route):
+        seen.append((cfg.host_label, got_attr, got_route))
+        return {"label": cfg.host_label}
+
+    _patch_status(monkeypatch, build, shared)
+    app = web.create_app((SimpleNamespace(host_label="m3"), SimpleNamespace(host_label="m1")), pool="P")
+    assert asyncio.run(_route(app, "/api/status").endpoint()) == {"hosts": [{"label": "m3"}, {"label": "m1"}]}
+    assert shared_calls == ["P"]
+    assert seen == [("m3", attributed, self_route), ("m1", attributed, self_route)]
+
+
 def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch):
-    def build(cfg, pool):
+    def build(cfg, pool, attributed, self_route):
         if cfg.host_label == "m1":
             raise RuntimeError("boom")
         return {"host": {"label": cfg.host_label}, "mode": "OBSERVE"}
 
-    monkeypatch.setattr(web.queries, "build_status", build)
+    _patch_status(monkeypatch, build)
     app = web.create_app(
         (SimpleNamespace(host_label="m3", host_spec="M3", live_execution=False),
          SimpleNamespace(host_label="m1", host_spec="M1", live_execution=False)),
@@ -62,6 +88,21 @@ def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch):
     assert err["host"] == {"label": "m1", "spec": "M1"}
     assert err["demand"] == [] and err["recent_decisions"] == []
     assert "boom" in err["error"]
+
+
+def test_status_keeps_host_rows_when_shared_data_fails(monkeypatch):
+    def shared(pool):
+        raise RuntimeError("votes down")
+
+    _patch_status(monkeypatch, lambda cfg, pool, attributed, self_route: {"label": cfg.host_label}, shared)
+    app = web.create_app(
+        (SimpleNamespace(host_label="m3", host_spec="M3", live_execution=False),
+         SimpleNamespace(host_label="m1", host_spec="M1", live_execution=False)),
+        pool=None,
+    )
+    body = asyncio.run(_route(app, "/api/status").endpoint())
+    assert all("votes down" in row["error"] for row in body["hosts"])
+    assert [row["host"]["label"] for row in body["hosts"]] == ["m3", "m1"]
 
 
 def test_lifespan_runs_one_loop_per_host_and_waits_for_them_on_shutdown(monkeypatch):

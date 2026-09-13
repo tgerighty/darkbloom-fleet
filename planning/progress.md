@@ -1,5 +1,8 @@
 # Progress
 
+- ~~[NOW] [REFACTOR] Share account-wide /api/status maps and one serving history per host~~
+  (2026-09-13: provider_hosts and latest_self_route once per GET; each host
+  derives 1h/7h/24h/30d/lifetime serving from one daemon_snapshots read)
 - ~~[NOW] [FEATURE] Dashboard glance, resilient refresh, and declutter~~
   (2026-09-13: current model, serving/idle, and latest decision on the band
   with OBSERVE would-switch; preserve details/scroll/focus across redraw;
