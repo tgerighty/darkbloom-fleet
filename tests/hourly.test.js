@@ -25,4 +25,13 @@ describe("hourly job rendering", function () {
     expect(html).toContain("0% / 0%");
     expect(hourlySection({})).toContain("Serving / idle");
   });
+
+  it("does not stop dashboard rendering for a cached legacy row", function () {
+    const html = hourlySection({ hourly_jobs: {
+      legend: [{ letter: "G", model: "gemma" }],
+      rows: [{ hour: 0, jobs: 2, counts: { gemma: 2 } }],
+    } });
+
+    expect(html).toContain(" ".repeat(40) + "    0% / 0%");
+  });
 });

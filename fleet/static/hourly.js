@@ -49,11 +49,13 @@ const DOT = '<span class="gap">.</span>';
 
 function bucketHtml(row, legend) {
   const byModel = Object.fromEntries(legend.map(function (entry) { return [entry.model, entry]; }));
-  const bar = row.portions.map(function (model) {
-    return model ? span(byModel[model].slot, byModel[model].letter) : DOT;
+  const portions = row.portions || [];
+  const bar = portions.map(function (model) {
+    const entry = byModel[model];
+    return entry ? span(entry.slot, entry.letter) : DOT;
   }).join("");
-  return bar + SPC.repeat(BAR_WIDTH - row.portions.length) + COL_GAP +
-    row.serving_percentage + "% / " + row.idle_percentage + "%";
+  return bar + SPC.repeat(BAR_WIDTH - portions.length) + COL_GAP +
+    (row.serving_percentage ?? 0) + "% / " + (row.idle_percentage ?? 0) + "%";
 }
 
 function rowsHtml(rows, legend) {
