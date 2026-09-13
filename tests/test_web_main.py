@@ -44,6 +44,26 @@ def test_status_returns_one_entry_per_host(monkeypatch):
     assert asyncio.run(_route(app, "/api/status").endpoint()) == {"hosts": [{"label": "m3"}, {"label": "m1"}]}
 
 
+def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch):
+    def build(cfg, pool):
+        if cfg.host_label == "m1":
+            raise RuntimeError("boom")
+        return {"host": {"label": cfg.host_label}, "mode": "OBSERVE"}
+
+    monkeypatch.setattr(web.queries, "build_status", build)
+    app = web.create_app(
+        (SimpleNamespace(host_label="m3", host_spec="M3", live_execution=False),
+         SimpleNamespace(host_label="m1", host_spec="M1", live_execution=False)),
+        pool=None,
+    )
+    body = asyncio.run(_route(app, "/api/status").endpoint())
+    assert body["hosts"][0] == {"host": {"label": "m3"}, "mode": "OBSERVE"}
+    err = body["hosts"][1]
+    assert err["host"] == {"label": "m1", "spec": "M1"}
+    assert err["demand"] == [] and err["recent_decisions"] == []
+    assert "boom" in err["error"]
+
+
 def test_lifespan_runs_one_loop_per_host_and_waits_for_them_on_shutdown(monkeypatch):
     finished = []
 

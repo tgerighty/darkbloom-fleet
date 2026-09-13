@@ -62,7 +62,33 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     # validation model from the annotation.
     @app.get("/api/status", response_model=None)
     async def status() -> dict[str, list[queries.Row]]:
-        statuses = await asyncio.gather(*(asyncio.to_thread(queries.build_status, cfg, pool) for cfg in configs))
+        statuses = await asyncio.gather(*(asyncio.to_thread(_status_row, cfg, pool) for cfg in configs))
         return {"hosts": list(statuses)}
 
     return app
+
+
+def _error_host(cfg: Config, exc: BaseException) -> queries.Row:
+    return {
+        "host": {"label": getattr(cfg, "host_label", "host"), "spec": getattr(cfg, "host_spec", "")},
+        "mode": "LIVE" if getattr(cfg, "live_execution", False) else "OBSERVE",
+        "current_model": None,
+        "inference_active": None,
+        "as_of": None,
+        "demand": [],
+        "recent_decisions": [],
+        "recent_earnings": [],
+        "serving": {},
+        "card": None,
+        "routability": None,
+        "hourly_jobs": None,
+        "unattributed_recent": 0,
+        "error": f"{type(exc).__name__}: {exc}",
+    }
+
+
+def _status_row(cfg: Config, pool: ConnectionPool) -> queries.Row:
+    try:
+        return queries.build_status(cfg, pool)
+    except Exception as exc:
+        return _error_host(cfg, exc)

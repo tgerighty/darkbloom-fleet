@@ -30,10 +30,10 @@ def _status_band(snapshot: Row, last_served_at: float | None, now: float) -> Row
     """The card's top band: OFF beats nothing, STALE beats everything (a stale
     read is not authoritative about trust or traffic), then trust decides."""
     if not snapshot:
-        return {"state": "OFF", "tone": "grey", "detail": "no daemon snapshot — host offline or not yet polled",
+        return {"state": "OFF", "tone": "red", "detail": "no daemon snapshot — host offline or not yet polled",
                 "priority": PRIORITY}
     if not snapshot.get("fresh"):
-        return {"state": "STALE", "tone": "grey", "detail": "daemon state not fresh — last read is not authoritative",
+        return {"state": "STALE", "tone": "red", "detail": "daemon state not fresh — last read is not authoritative",
                 "priority": PRIORITY}
     if snapshot.get("trust_level") == HARDWARE_TRUST:
         if _served_recently(snapshot, last_served_at, now):

@@ -9,7 +9,7 @@ def _daemon(**fields):
 
 def test_off_without_a_snapshot(fake_pool):
     built = card.build_card(fake_pool([{"tokens": 0, "requests": 0}]), "h", None, None, [], 1_000.0)
-    assert built["status"]["state"] == "OFF" and built["status"]["tone"] == "grey"
+    assert built["status"]["state"] == "OFF" and built["status"]["tone"] == "red"
     assert built["loaded"] == [] and built["catalog"] == [] and built["slots"] == []
     assert built["kpis"]["started_at"] is None and built["kpis"]["tokens"] == 0
 
@@ -17,7 +17,7 @@ def test_off_without_a_snapshot(fake_pool):
 def test_stale_beats_trust_and_traffic(fake_pool):
     built = card.build_card(fake_pool([{"tokens": 0, "requests": 0}]), "h",
                             _daemon(fresh=False, inference_active=True), None, [], 1_000.0)
-    assert (built["status"]["state"], built["status"]["tone"]) == ("STALE", "grey")
+    assert (built["status"]["state"], built["status"]["tone"]) == ("STALE", "red")
 
 
 def test_earning_with_hardware_trust_and_traffic_now(fake_pool):
