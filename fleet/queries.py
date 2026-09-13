@@ -84,21 +84,38 @@ def recent_earnings(pool: ConnectionPool, now: float, hashes: list[str], limit: 
         return conn.execute(_RECENT_SQL, (now, hashes, limit)).fetchall()
 
 
-def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
-    """Percentage of the window each model was actively serving a request,
-    plus "idle" for the rest: warm but not serving, no model, no snapshot, or
-    a snapshot with fresh=false. Each fresh snapshot's inference_active holds
-    until the next one (the last until now), counted only inside the window;
-    a gap longer than OUTAGE_GAP_SECONDS is an outage and counts as idle.
-    Snapshots are a minute apart, so requests shorter than that are under-counted."""
-    points = [*snapshots, {"observed_at": now, "current_model": None, "inference_active": False}]
-    totals: dict[str, float] = {}
-    for prev, nxt in pairwise(points):
-        model = prev["current_model"]
-        if (model and prev.get("inference_active") and prev.get("fresh", True)
-                and 0 < nxt["observed_at"] - prev["observed_at"] <= OUTAGE_GAP_SECONDS):
-            held = nxt["observed_at"] - max(prev["observed_at"], since)
-            totals[model] = totals.get(model, 0.0) + held
+_BOUNDED_SERVING_SQL = (
+    "SELECT observed_at, current_model, inference_active, fresh FROM ("
+    "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
+    "WHERE host = %s AND observed_at > %s AND observed_at <= %s "
+    "UNION ALL "
+    "SELECT observed_at, current_model, inference_active, fresh FROM ("
+    "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
+    "WHERE host = %s AND observed_at <= %s ORDER BY observed_at DESC LIMIT 1"
+    ") left_boundary) bounded ORDER BY observed_at"
+)
+_LIFETIME_SERVING_SQL = (
+    "WITH snaps AS ("
+    "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
+    "WHERE host = %s AND observed_at <= %s"
+    "), bounds AS (SELECT MIN(observed_at) AS since FROM snaps), ordered AS ("
+    "SELECT s.observed_at, s.current_model, s.inference_active, s.fresh, "
+    "LEAD(s.observed_at) OVER (ORDER BY s.observed_at) AS lead_at, b.since "
+    "FROM snaps s CROSS JOIN bounds b"
+    "), held AS ("
+    "SELECT current_model, since, CASE WHEN current_model IS NOT NULL "
+    "AND inference_active AND fresh "
+    f"AND 0 < (COALESCE(lead_at, %s) - observed_at) AND (COALESCE(lead_at, %s) - observed_at) <= {int(OUTAGE_GAP_SECONDS)} "
+    "THEN COALESCE(lead_at, %s) - GREATEST(observed_at, since) ELSE 0 END AS seconds "
+    "FROM ordered) "
+    "SELECT b.since, h.model, h.seconds FROM bounds b LEFT JOIN ("
+    "SELECT current_model AS model, SUM(seconds) AS seconds FROM held "
+    "WHERE seconds > 0 AND current_model IS NOT NULL GROUP BY current_model"
+    ") h ON TRUE"
+)
+
+
+def _shares_from_totals(totals: dict[str, float], since: float, now: float) -> dict[str, float]:
     window = now - since
     if window <= 0:
         return {}
@@ -107,10 +124,33 @@ def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str,
     return shares
 
 
+def _serving_shares(snapshots: list[Row], since: float, now: float) -> dict[str, float]:
+    """Percentage of the window each model was actively serving a request,
+    plus "idle" for the rest: warm but not serving, no model, no snapshot, or
+    a snapshot with fresh=false. Each fresh snapshot's inference_active holds
+    until the next one (the last until now), counted only inside the window;
+    a gap longer than OUTAGE_GAP_SECONDS is an outage and counts as idle.
+    Snapshots are a minute apart, so requests shorter than that are under-counted.
+    Rows after `now` never contribute."""
+    usable = [snap for snap in snapshots if float(snap["observed_at"]) <= now]
+    points = [*usable, {"observed_at": now, "current_model": None, "inference_active": False}]
+    totals: dict[str, float] = {}
+    for prev, nxt in pairwise(points):
+        model = prev["current_model"]
+        nxt_at = min(float(nxt["observed_at"]), now)
+        if (model and prev.get("inference_active") and prev.get("fresh", True)
+                and 0 < nxt_at - float(prev["observed_at"]) <= OUTAGE_GAP_SECONDS):
+            held = nxt_at - max(float(prev["observed_at"]), since)
+            if held > 0:
+                totals[str(model)] = totals.get(str(model), 0.0) + held
+    return _shares_from_totals(totals, since, now)
+
+
 def _window_shares(snapshots: list[Row], window_seconds: float | None, now: float) -> dict[str, float]:
     """Reduce one ordered history to a window. None = since the first snapshot.
     The latest row at or before `since` is the state already in force; later
     rows fill the window. Every window of one status row uses the same `now`."""
+    snapshots = [snap for snap in snapshots if float(snap["observed_at"]) <= now]
     if window_seconds is None:
         if not snapshots:
             return {}
@@ -127,16 +167,40 @@ def _window_shares(snapshots: list[Row], window_seconds: float | None, now: floa
     return _serving_shares(([before] if before else []) + after, since, now)
 
 
+def _lifetime_shares(rows: list[Row], now: float) -> dict[str, float]:
+    if not rows:
+        return {}
+    since = rows[0].get("since")
+    if since is None:
+        return {}
+    totals: dict[str, float] = {}
+    for row in rows:
+        model = row.get("model")
+        seconds = row.get("seconds")
+        if not model or seconds is None:
+            continue
+        totals[str(model)] = totals.get(str(model), 0.0) + float(seconds)
+    return _shares_from_totals(totals, float(since), now)
+
+
 def serving_percentages(pool: ConnectionPool, host: str, now: float) -> dict[str, dict[str, float]]:
     """Share of each dashboard window that each model was actively serving.
-    One history read; every window uses this `now` and the left-boundary state."""
+    Named windows share one 30-day history plus the left-boundary row;
+    lifetime is a separate LEAD aggregate. Future rows are excluded."""
+    bound_start = now - 30 * DAY_SECONDS
     with pool.connection() as conn:
         snapshots = conn.execute(
-            "SELECT observed_at, current_model, inference_active, fresh FROM daemon_snapshots "
-            "WHERE host = %s ORDER BY observed_at",
-            (host,),
+            _BOUNDED_SERVING_SQL, (host, bound_start, now, host, bound_start),
         ).fetchall()
-    return {name: _window_shares(snapshots, seconds, now) for name, seconds in SERVING_WINDOWS.items()}
+        lifetime_rows = conn.execute(
+            _LIFETIME_SERVING_SQL, (host, now, now, now, now),
+        ).fetchall()
+    named = {
+        name: _window_shares(snapshots, seconds, now)
+        for name, seconds in SERVING_WINDOWS.items() if seconds is not None
+    }
+    named["lifetime"] = _lifetime_shares(lifetime_rows, now)
+    return named
 
 
 def shared_status_data(

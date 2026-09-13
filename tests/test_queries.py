@@ -43,6 +43,11 @@ def test_an_empty_window_has_no_shares():
     assert _serving_shares([], since=1000, now=1000) == {}
 
 
+def test_a_future_snapshot_does_not_count_time_after_now():
+    shares = _serving_shares([_snap(1000, "a"), _snap(2000, "a")], since=1000, now=1500)
+    assert shares == {"a": 100.0, "idle": 0.0}
+
+
 def test_snapshots_with_fresh_false_do_not_count_as_serving():
     snaps = [_snap(0, "a", fresh=False), _snap(60, "a", fresh=False), _snap(120, "a", fresh=False)]
     assert _serving_shares(snaps, since=0, now=180) == {"idle": 100.0}
@@ -69,6 +74,12 @@ def test_lifetime_window_starts_at_the_first_snapshot():
     assert _window_shares([], None, 1200.0) == {}
 
 
+def test_window_shares_drop_future_snapshots():
+    snaps = [_snap(1000.0, "a"), _snap(2000.0, "b")]
+    assert _window_shares(snaps, 600.0, 1500.0) == {"a": 83.3, "idle": 16.7}
+    assert _window_shares(snaps, None, 1500.0) == {"a": 100.0, "idle": 0.0}
+
+
 def test_window_shares_treat_unfresh_snapshots_as_idle():
     snaps = [_snap(0.0, "a", fresh=False), _snap(60.0, "a", fresh=False), _snap(120.0, "a", fresh=False)]
     assert _window_shares(snaps, 180.0, 180.0) == {"idle": 100.0}
@@ -90,25 +101,37 @@ def test_a_gap_inside_a_named_window_counts_as_idle():
     assert _window_shares(snaps, 3_600.0, 4_000.0) == {"a": 8.3, "idle": 91.7}
 
 
-def test_serving_percentages_reads_history_once(fake_pool):
-    pool = fake_pool([_snap(900.0, "a"), _snap(1100.0, "b")])
+def test_serving_percentages_reads_bounded_history_and_a_lifetime_aggregate(fake_pool):
+    snaps = [_snap(900.0, "a"), _snap(1100.0, "b")]
+    lifetime = [{"since": 900.0, "model": "a", "seconds": 200.0},
+                {"since": 900.0, "model": "b", "seconds": 100.0}]
+    pool = fake_pool(snaps, lifetime)
     result = queries.serving_percentages(pool, "h", 1200.0)
     assert set(result) == set(queries.SERVING_WINDOWS)
     assert result["lifetime"] == {"a": 66.7, "b": 33.3, "idle": 0.0}
-    assert len(pool.calls) == 1
-    sql, params = pool.calls[0]
-    assert "inference_active, fresh" in sql
-    assert "observed_at >" not in sql and "LIMIT" not in sql
-    assert params == ("h",)
+    assert len(pool.calls) == 2
+    bounded_sql, bounded_params = pool.calls[0]
+    life_sql, life_params = pool.calls[1]
+    assert "UNION ALL" in bounded_sql and "LIMIT 1" in bounded_sql and "left_boundary" in bounded_sql
+    assert "LEAD(" in life_sql
+    assert bounded_params == ("h", 1200.0 - 30 * queries.DAY_SECONDS, 1200.0, "h", 1200.0 - 30 * queries.DAY_SECONDS)
+    assert life_params == ("h", 1200.0, 1200.0, 1200.0, 1200.0)
+    assert result["1h"] == _window_shares(snaps, 3600, 1200.0)
+
+
+def test_serving_percentages_lifetime_idle_when_the_aggregate_has_no_model_seconds(fake_pool):
+    pool = fake_pool([], [{"since": 900.0, "model": None, "seconds": None}])
+    result = queries.serving_percentages(pool, "h", 1200.0)
+    assert result["lifetime"] == {"idle": 100.0}
 
 
 def _status_responses(daemon, demand, decisions, card_totals=None, hourly=None):
     """Canned rows in the order build_status queries them: daemon, demand,
-    last-served, measured switch cost, earnings x2, one serving history,
+    last-served, measured switch cost, earnings x2, bounded serving plus lifetime,
     decisions, earnings rows, unattributed recent hashes, the card's session
     payout totals, the hourly jobs buckets."""
     return [daemon, demand, [], [{"median": None, "n": 0}],
-            [{"total": 2_500_000}], [{"total": 500_000}], [], decisions,
+            [{"total": 2_500_000}], [{"total": 500_000}], [], [], decisions,
             [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}],
             [{"provider_hash": None}, {"provider_hash": "no-votes"}],
             card_totals or [{"tokens": 4_000, "requests": 2}],
@@ -152,8 +175,9 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
                                                      "measured_sessions": 0}}
     assert all("self_route_samples" not in sql for sql, _ in pool.calls)
     assert all("next_served >" not in sql for sql, _ in pool.calls)
-    serving_sql = [sql for sql, _ in pool.calls if "inference_active, fresh" in sql]
-    assert len(serving_sql) == 1
+    bounded_sql = [sql for sql, _ in pool.calls if "left_boundary" in sql]
+    lifetime_sql = [sql for sql, _ in pool.calls if "LEAD(" in sql]
+    assert len(bounded_sql) == 1 and len(lifetime_sql) == 1
 
 
 def _assert_unique_hash_owned_sql(sql: str) -> None:
@@ -236,7 +260,8 @@ def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
     queries.build_status(_host_cfg("m1"), pool, attributed, self_route)
     vote_sql = [sql for sql, _ in pool.calls if "next_served >" in sql]
     route_sql = [sql for sql, _ in pool.calls if "self_route_samples" in sql]
-    serving_sql = [sql for sql, _ in pool.calls if "inference_active, fresh" in sql]
+    bounded_sql = [sql for sql, _ in pool.calls if "left_boundary" in sql]
+    lifetime_sql = [sql for sql, _ in pool.calls if "LEAD(" in sql]
     assert len(vote_sql) == 1
     assert len(route_sql) == 2
-    assert len(serving_sql) == 2
+    assert len(bounded_sql) == 2 and len(lifetime_sql) == 2
