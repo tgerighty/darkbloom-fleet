@@ -1,4 +1,4 @@
-import { hourlySection } from "./hourly.js";
+import { hourlySection } from "./hourly.js?v=2";
 
 const TD = "</td><td>";
 const TR = "<tr><td>";
