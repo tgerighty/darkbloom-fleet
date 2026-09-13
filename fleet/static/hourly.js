@@ -73,6 +73,6 @@ export function hourlySection(s) {
     return { letter: e.letter, model: e.model, slot: i };
   });
   const lines = legend.length ? [legendLine(legend), headerLine()] : [headerLine()];
-  lines.push(rowsHtml(h.rows || [], legend));
+  lines.push(rowsHtml(h.rows, legend));
   return FOLD + '<pre class="hourly">' + lines.join(NL) + "</pre></details>";
 }
