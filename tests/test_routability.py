@@ -87,17 +87,18 @@ def test_the_panel_hides_measured_cost_until_the_switcher_sample_count(fake_pool
 
 
 def test_the_panel_marks_installed_status_and_lists_on_disk_ids(fake_pool):
-    pool = fake_pool([{"t": None}], [], [{"median": None, "n": 0}])
+    pool = fake_pool([], [{"median": None, "n": 0}])
     daemon = {"advertised_models": ["a"], "warm_models": ["a"], "installed_models": ["a", "disk-only"]}
-    models = {row["model"]: row for row in routability.routability_panel(pool, "h", daemon, 300.0)["models"]}
+    models = {row["model"]: row for row in routability.routability_panel(
+        pool, "h", daemon, 300.0, (None, {}))["models"]}
     assert models["a"]["installed"] is True
     assert models["disk-only"] == {
         "model": "disk-only", "advertised": False, "warm": False, "routable_providers": 0,
         "last_served_at": None, "installed": True,
     }
     empty = routability.routability_panel(
-        fake_pool([{"t": None}], [], [{"median": None, "n": 0}]),
-        "h", {"advertised_models": ["a"], "warm_models": [], "installed_models": []}, 300.0)
+        fake_pool([], [{"median": None, "n": 0}]),
+        "h", {"advertised_models": ["a"], "warm_models": [], "installed_models": []}, 300.0, (None, {}))
     assert empty["models"] == [
         {"model": "a", "advertised": True, "warm": False, "routable_providers": 0,
          "last_served_at": None, "installed": False},
