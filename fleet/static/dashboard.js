@@ -33,7 +33,7 @@ function setSubtitle(s) {
   const n = s?.hosts ? s.hosts.length : 0;
   const el = subtitleEl();
   if (pollError) {
-    const age = lastGoodAt ? fmtAge(lastGoodAt) : "never";
+    const age = fmtAge(lastGoodAt);
     showError("status unavailable: " + esc(pollError) + " · showing data from " + age);
     return;
   }
