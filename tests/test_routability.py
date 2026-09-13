@@ -27,6 +27,13 @@ def test_last_served_per_model(fake_pool):
     assert routability.last_served(pool, "h") == {"a": 500.0, "b": 900.0}
 
 
+def test_last_served_counts_the_first_snapshot_of_a_session(fake_pool):
+    pool = fake_pool([{"model": "a", "t": 100.0}])
+    assert routability.last_served(pool, "h") == {"a": 100.0}
+    sql = " ".join(pool.calls[0][0].split())
+    assert "coalesce(lag(requests_served) OVER (PARTITION BY started_at ORDER BY observed_at), 0)" in sql
+
+
 def test_measured_switch_cost_is_the_median_over_serving_sessions(fake_pool):
     assert routability.measured_switch_cost(fake_pool([{"median": 312.4, "n": 7}]), "h") == (312.4, 7)
 
@@ -36,34 +43,66 @@ def test_measured_switch_cost_waits_for_three_serving_sessions(fake_pool):
 
 
 def test_the_panel_merges_the_host_view_with_the_account_view(fake_pool):
-    pool = fake_pool([{"t": 100.0}],
-                     [{"model": "gemma-4-26b", "routable_providers": 1}, {"model": "gpt-oss-20b", "routable_providers": 3},
-                      {"model": "other-model", "routable_providers": 2}],
-                     [{"model": "gpt-oss-20b", "t": 90.0}, {"model": "old-model", "t": 20.0}],
+    pool = fake_pool([{"model": "gpt-oss-20b", "t": 90.0}, {"model": "old-model", "t": 20.0}],
                      [{"median": 312.4, "n": 7}], [{"t": 130.0}], [{"t": None}])
     daemon = {"advertised_models": ["gpt-oss-20b", "gemma-4-26b-qat-4bit"], "warm_models": ["gpt-oss-20b", "z-warm-only"],
               "started_at": 70.0, "trust_level": "self_signed", "trust_reason": "awaiting MDM verification"}
-    panel = routability.routability_panel(pool, "h", daemon, 300.0)
+    self_route = (100.0, {"gemma-4-26b": 1, "gpt-oss-20b": 3, "other-model": 2})
+    panel = routability.routability_panel(pool, "h", daemon, 300.0, self_route)
     assert panel["self_route_as_of"] == 100.0 and panel["last_served_at"] == 90.0
     assert (panel["trust_level"], panel["trust_reason"]) == ("self_signed", "awaiting MDM verification")
     # The coordinator's short id (gemma-4-26b) folds into our advertised
     # gemma-4-26b-qat-4bit row; an id matching nothing keeps its own row.
     assert panel["models"] == [
-        {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 1, "last_served_at": None},
-        {"model": "gpt-oss-20b", "advertised": True, "warm": True, "routable_providers": 3, "last_served_at": 90.0},
-        {"model": "old-model", "advertised": False, "warm": False, "routable_providers": 0, "last_served_at": 20.0},
-        {"model": "other-model", "advertised": False, "warm": False, "routable_providers": 2, "last_served_at": None},
-        {"model": "z-warm-only", "advertised": False, "warm": True, "routable_providers": 0, "last_served_at": None},
+        {"model": "gemma-4-26b-qat-4bit", "advertised": True, "warm": False, "routable_providers": 1,
+         "last_served_at": None, "installed": None},
+        {"model": "gpt-oss-20b", "advertised": True, "warm": True, "routable_providers": 3,
+         "last_served_at": 90.0, "installed": None},
+        {"model": "old-model", "advertised": False, "warm": False, "routable_providers": 0,
+         "last_served_at": 20.0, "installed": None},
+        {"model": "other-model", "advertised": False, "warm": False, "routable_providers": 2,
+         "last_served_at": None, "installed": None},
+        {"model": "z-warm-only", "advertised": False, "warm": True, "routable_providers": 0,
+         "last_served_at": None, "installed": None},
     ]
     assert panel["session"] == {"started_at": 70.0, "any_host_routable_after_min": 1.0, "first_request_after_min": None}
     assert panel["switch_cost"] == {"configured_seconds": 300.0, "measured_seconds": 312.4, "measured_sessions": 7}
 
 
 def test_the_panel_without_a_daemon_snapshot(fake_pool):
-    panel = routability.routability_panel(fake_pool([{"t": None}], [], [{"median": None, "n": 0}]), "h", None, 300.0)
+    panel = routability.routability_panel(
+        fake_pool([], [{"median": None, "n": 0}]), "h", None, 300.0, (None, {}))
     assert panel == {"self_route_as_of": None, "trust_level": None, "trust_reason": None, "last_served_at": None,
                      "models": [], "session": None,
                      "switch_cost": {"configured_seconds": 300.0, "measured_seconds": None, "measured_sessions": 0}}
+
+
+def test_the_panel_hides_measured_cost_until_the_switcher_sample_count(fake_pool):
+    two = routability.routability_panel(
+        fake_pool([], [{"median": 400.0, "n": 2}]), "h", None, 300.0, (None, {}))
+    assert two["switch_cost"] == {"configured_seconds": 300.0, "measured_seconds": None, "measured_sessions": 2}
+    three = routability.routability_panel(
+        fake_pool([], [{"median": 400.0, "n": 3}]), "h", None, 300.0, (None, {}))
+    assert three["switch_cost"] == {"configured_seconds": 300.0, "measured_seconds": 400.0, "measured_sessions": 3}
+
+
+def test_the_panel_marks_installed_status_and_lists_on_disk_ids(fake_pool):
+    pool = fake_pool([], [{"median": None, "n": 0}])
+    daemon = {"advertised_models": ["a"], "warm_models": ["a"], "installed_models": ["a", "disk-only"]}
+    models = {row["model"]: row for row in routability.routability_panel(
+        pool, "h", daemon, 300.0, (None, {}))["models"]}
+    assert models["a"]["installed"] is True
+    assert models["disk-only"] == {
+        "model": "disk-only", "advertised": False, "warm": False, "routable_providers": 0,
+        "last_served_at": None, "installed": True,
+    }
+    empty = routability.routability_panel(
+        fake_pool([], [{"median": None, "n": 0}]),
+        "h", {"advertised_models": ["a"], "warm_models": [], "installed_models": []}, 300.0, (None, {}))
+    assert empty["models"] == [
+        {"model": "a", "advertised": True, "warm": False, "routable_providers": 0,
+         "last_served_at": None, "installed": False},
+    ]
 
 
 def test_an_ambiguous_alias_keeps_the_coordinator_row():

@@ -17,6 +17,9 @@ from .config import Config
 from .types import DaemonState, Payout, Slot
 
 DAEMON_STATE_PATH = "~/.darkbloom/daemon-state.json"
+# Same binary the fast-switch watcher invokes as Path.home() / ".darkbloom" /
+# "bin" / "darkbloom". Bare `darkbloom` is not on non-interactive SSH PATH.
+DARKBLOOM_BIN = "~/.darkbloom/bin/darkbloom"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
 WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
 _WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
@@ -27,6 +30,11 @@ _STATE_COMMAND = (
     f"cat {DAEMON_STATE_PATH} && printf '\\n{_DOC_SEPARATOR}\\n' && "
     f"(sqlite3 {WIDGET_METRICS_DB_PATH} '{_WIDGET_LATEST_SQL}' || true)"
 )
+# Separate from _STATE_COMMAND: a slow or failed inventory read must not
+# stall or fail the daemon snapshot that freshness is judged from.
+_INVENTORY_COMMAND = f"{DARKBLOOM_BIN} models list --all --json"
+_MAX_INSTALLED_MODELS = 256
+_MAX_MODEL_ID_LENGTH = 256
 
 FAST_SWITCH_WATCHER_ASSET = Path(__file__).parent / "remote_assets" / "fast_switch_watcher.py"
 FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
@@ -72,6 +80,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
     written_at = float(payload.get("written_at") or 0)
     trust = _section(payload, "trust")
     gpu_active, gpu_cache, gpu_total = _capacity_gbs(payload)
+    load_error = _model_load_error(payload)
     return DaemonState(
         current_model=_text(payload.get("current_model")),
         warm_models=_model_ids(payload, "warm_models"),
@@ -93,7 +102,52 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         gpu_cache_gb=gpu_cache,
         total_memory_gb=gpu_total,
         slots=_slots(payload),
+        last_model_load_error_model=load_error[0],
+        last_model_load_error_message=load_error[1],
+        last_model_load_error_at=load_error[2],
     )
+
+
+def fetch_installed_models(cfg: Config) -> tuple[str, ...]:
+    """Read-only local-cache ids. Observation only — not gated by live
+    execution. Raises on SSH failure or malformed JSON/shape; an empty
+    tuple is a verified empty cache. Presence of an id means on disk."""
+    raw = _run_ssh(cfg, _INVENTORY_COMMAND, timeout=20)
+    ids = _parse_installed_model_ids(raw)
+    if ids is None:
+        raise RuntimeError("installed-model inventory is malformed")
+    return ids
+
+
+def _installed_model_id(item: object) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    model_id = item.get("id")
+    if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
+        return None
+    return model_id
+
+
+def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
+    """Non-empty string models[].id values, first-seen order. None = unknown
+    (malformed item, oversize id/list, or unreadable JSON/shape). An empty
+    list is verified empty, not unknown."""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    models = payload.get("models")
+    if not isinstance(models, list) or len(models) > _MAX_INSTALLED_MODELS:
+        return None
+    ids: list[str] = []
+    for item in models:
+        model_id = _installed_model_id(item)
+        if model_id is None:
+            return None
+        ids.append(model_id)
+    return tuple(dict.fromkeys(ids))
 
 
 def _split_documents(raw: str) -> tuple[str, str]:
@@ -158,6 +212,15 @@ def _slots(payload: dict[str, object]) -> tuple[Slot, ...]:
     return tuple(slots)
 
 
+def _model_load_error(payload: dict[str, object]) -> tuple[str | None, str | None, float | None]:
+    """(model, message, at) from daemon-state.json. A missing, non-object, or
+    non-finite value becomes None and never fails the rest of the read."""
+    raw = payload.get("last_model_load_error")
+    if not isinstance(raw, dict):
+        return None, None, None
+    return _text(raw.get("model")), _text(raw.get("message")), _optional_float(raw, "at")
+
+
 def _section(payload: dict[str, object], key: str) -> dict[str, object]:
     value = payload.get(key)
     return value if isinstance(value, dict) else {}
@@ -179,7 +242,7 @@ def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
     raw = _run_ssh(cfg, remote_command, timeout=20)
     rows = json.loads(raw)
     return [Payout(rowid=r[0], model=r[1], completion_tokens=r[2] or 0, micro_usd=r[3] or 0,
-                   created_at=r[4], provider_hash=r[5]) for r in rows]
+                   created_at=r[4], provider_hash=r[5] or None) for r in rows]
 
 
 def execute_switch(cfg: Config, target_model: str) -> None:
@@ -187,7 +250,7 @@ def execute_switch(cfg: Config, target_model: str) -> None:
     backoff; this makes no safety checks of its own — see collector.py."""
     if not cfg.live_execution:
         raise RuntimeError("refusing to execute a switch: FLEET_LIVE_EXECUTION is not enabled")
-    command = f"darkbloom start --model {shlex.quote(target_model)} --idle-timeout 0"
+    command = f"{DARKBLOOM_BIN} start --model {shlex.quote(target_model)} --idle-timeout 0"
     _run_ssh(cfg, command, timeout=300)
 
 
@@ -222,6 +285,7 @@ def launch_fast_switch_watcher(cfg: Config, target: str, max_seconds: float) -> 
         "valid_targets": list(cfg.models),
         "max_seconds": max_seconds,
         "restart_backoff_seconds": cfg.restart_backoff_seconds,
+        "daemon_freshness_seconds": cfg.daemon_freshness_seconds,
         "written_at": time.time(),
     })
     script_tmp = f"{FAST_SWITCH_SCRIPT_PATH}.tmp"

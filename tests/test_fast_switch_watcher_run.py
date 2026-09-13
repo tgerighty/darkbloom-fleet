@@ -17,10 +17,14 @@ def watcher(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     paths = {"LOCK_FILE": "lock", "FAILED_AT_FILE": "failed-at", "TARGET_STATE_PATH": "state.json",
-             "LOG": "fast_switch.log", "DAEMON_STATE_PATH": "daemon-state.json"}
+             "LOG": "fast_switch.log", "DAEMON_STATE_PATH": "daemon-state.json",
+             "WIDGET_METRICS_DB_PATH": "metrics.db"}
     for name, filename in paths.items():
         monkeypatch.setattr(module, name, tmp_path / filename)
     monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    module.TARGET_STATE_PATH.write_text(json.dumps({"daemon_freshness_seconds": 1_000_000.0}))
+    module._real_fetch_installed_ids = module._fetch_installed_ids
+    monkeypatch.setattr(module, "_fetch_installed_ids", lambda: ("a", "b"))
     return module
 
 
@@ -29,7 +33,50 @@ def _completed(returncode: int, stderr: str = "") -> subprocess.CompletedProcess
 
 
 def _target(watcher, **state) -> None:
-    watcher.TARGET_STATE_PATH.write_text(json.dumps({"target": "b", "valid_targets": ["a", "b"], **state}))
+    payload = {"target": "b", "valid_targets": ["a", "b"], "daemon_freshness_seconds": 1_000_000.0}
+    payload.update(state)
+    watcher.TARGET_STATE_PATH.write_text(json.dumps(payload))
+
+
+def test_execute_switch_refuses_when_inventory_is_unknown_or_missing_the_target(watcher, monkeypatch):
+    monkeypatch.setattr(watcher, "_run_start", lambda target: (_ for _ in ()).throw(AssertionError("start")))
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: None)
+    assert watcher.execute_switch("b") is False
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: ("a",))
+    assert watcher.execute_switch("b") is False
+
+
+def test_inventory_list_uses_the_local_darkbloom_bin(watcher, monkeypatch):
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout='{"models": [{"id": "b"}]}', stderr="")
+
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", watcher._real_fetch_installed_ids)
+    monkeypatch.setattr(watcher.subprocess, "run", fake_run)
+    assert watcher._inventory_allows("b") is True
+    assert seen["args"][:4] == [str(watcher.DARKBLOOM_BIN), "models", "list", "--all"]
+
+
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired("darkbloom", 20), FileNotFoundError("darkbloom")])
+def test_inventory_list_timeout_or_missing_cli_is_unknown(watcher, monkeypatch, error):
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", watcher._real_fetch_installed_ids)
+
+    def fake_run(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(watcher.subprocess, "run", fake_run)
+    assert watcher._inventory_allows("b") is False
+
+
+def test_inventory_list_nonzero_exit_is_unknown(watcher, monkeypatch):
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", watcher._real_fetch_installed_ids)
+    monkeypatch.setattr(
+        watcher.subprocess, "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 1, stdout="", stderr="fail"),
+    )
+    assert watcher._inventory_allows("b") is False
 
 
 def test_daemon_state_comes_from_the_state_file(watcher):
@@ -90,14 +137,18 @@ def test_main_waits_out_the_failure_backoff(watcher, monkeypatch):
 
 def test_main_logs_a_timeout_when_no_idle_gap_opens(watcher, monkeypatch):
     _target(watcher, max_seconds=0.05)
-    monkeypatch.setattr(watcher, "read_daemon_state", lambda: {"current_model": "a", "inference_active": True})
+    monkeypatch.setattr(watcher, "read_daemon_state",
+                        lambda: {"current_model": "a", "inference_active": True,
+                                 "trust": {"trust_level": "hardware"}, "written_at": time.time()})
     watcher.main()
     assert "timed out" in watcher.LOG.read_text()
 
 
 def test_main_records_a_failed_switch_for_the_backoff(watcher, monkeypatch):
     _target(watcher, max_seconds=5)
-    monkeypatch.setattr(watcher, "read_daemon_state", lambda: {"current_model": "a", "inference_active": False})
+    monkeypatch.setattr(watcher, "read_daemon_state",
+                        lambda: {"current_model": "a", "inference_active": False,
+                                 "trust": {"trust_level": "hardware"}, "written_at": time.time()})
     monkeypatch.setattr(watcher, "execute_switch", lambda target: False)
     watcher.main()
     assert watcher.FAILED_AT_FILE.exists()

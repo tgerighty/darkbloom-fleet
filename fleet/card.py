@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from psycopg_pool import ConnectionPool
 
+from .attribution import unique_payouts_sql
+from .types import LOAD_ERROR_BLOCK_SECONDS
+
 Row = dict[str, object]
 
 # darkbloom.dev shows "receiving traffic" while a request landed in the last
@@ -24,14 +27,27 @@ def _served_recently(snapshot: Row, last_served_at: float | None, now: float) ->
     return last_served_at is not None and now - last_served_at <= RECENT_TRAFFIC_SECONDS
 
 
-def _status_band(snapshot: Row, last_served_at: float | None, now: float) -> Row:
+def _snapshot_is_stale(snapshot: Row, now: float, freshness_seconds: float) -> bool:
+    if not snapshot.get("fresh"):
+        return True
+    observed_at = snapshot.get("observed_at")
+    if observed_at is None:
+        return False
+    try:
+        return now - float(observed_at) > freshness_seconds
+    except (TypeError, ValueError):
+        return False
+
+
+def _status_band(snapshot: Row, last_served_at: float | None, now: float,
+                 freshness_seconds: float) -> Row:
     """The card's top band: OFF beats nothing, STALE beats everything (a stale
     read is not authoritative about trust or traffic), then trust decides."""
     if not snapshot:
-        return {"state": "OFF", "tone": "grey", "detail": "no daemon snapshot — host offline or not yet polled",
+        return {"state": "OFF", "tone": "red", "detail": "no daemon snapshot — host offline or not yet polled",
                 "priority": PRIORITY}
-    if not snapshot.get("fresh"):
-        return {"state": "STALE", "tone": "grey", "detail": "daemon state not fresh — last read is not authoritative",
+    if _snapshot_is_stale(snapshot, now, freshness_seconds):
+        return {"state": "STALE", "tone": "red", "detail": "daemon state not fresh — last read is not authoritative",
                 "priority": PRIORITY}
     if snapshot.get("trust_level") == HARDWARE_TRUST:
         if _served_recently(snapshot, last_served_at, now):
@@ -55,6 +71,22 @@ def _gpu(snapshot: Row) -> Row:
     return {"active_gb": active, "cache_gb": cache, "total_gb": snapshot.get("total_memory_gb"), "peak_gb": peak}
 
 
+def _load_error(snapshot: Row, now: float) -> Row | None:
+    """Last daemon load failure, or None when every field is missing."""
+    model = snapshot.get("last_model_load_error_model")
+    message = snapshot.get("last_model_load_error_message")
+    at = snapshot.get("last_model_load_error_at")
+    if model is None and message is None and at is None:
+        return None
+    age = None
+    try:
+        age = now - float(at) if at is not None else None
+    except (TypeError, ValueError):
+        age = None
+    return {"model": model, "message": message, "at": at,
+            "recent": age is not None and abs(age) <= LOAD_ERROR_BLOCK_SECONDS}
+
+
 def _loaded(snapshot: Row) -> list[Row]:
     """Warm models as chips; the current one is marked active while a request
     is actually in flight on it."""
@@ -63,25 +95,32 @@ def _loaded(snapshot: Row) -> list[Row]:
     return [{"model": m, "active": busy and m == current} for m in (snapshot.get("warm_models") or [])]
 
 
-def session_totals(pool: ConnectionPool, host: str, since: float, hashes: list[str]) -> Row:
-    """Tokens paid out and payout-row count for this host's attributed
+_SESSION_TOTALS_SQL = (
+    "SELECT coalesce(sum(completion_tokens), 0) AS tokens, count(*) AS requests FROM ("
+    + unique_payouts_sql(
+        "completion_tokens",
+        "created_at > %s AND created_at <= %s AND provider_hash = ANY(%s)",
+    )
+    + ") unique_payouts"
+)
+
+
+def session_totals(pool: ConnectionPool, since: float, now: float, hashes: list[str]) -> Row:
+    """Tokens paid out and unique payout-row count for this host's attributed
     sessions since `since` — the TOKENS tile's value and its "n reqs" sub."""
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT coalesce(sum(completion_tokens), 0) AS tokens, count(*) AS requests FROM earnings "
-            "WHERE host = %s AND created_at > %s AND provider_hash = ANY(%s)",
-            (host, since, hashes),
-        ).fetchone()
+        row = conn.execute(_SESSION_TOTALS_SQL, (since, now, hashes)).fetchone()
     return {"tokens": int(row["tokens"]), "requests": int(row["requests"])}
 
 
 def build_card(pool: ConnectionPool, host: str, daemon: Row | None,
-               last_served_at: float | None, hashes: list[str], now: float) -> Row:
+               last_served_at: float | None, hashes: list[str], now: float,
+               freshness_seconds: float) -> Row:
     snapshot = daemon or {}
     started_at = float(snapshot.get("started_at") or 0)
-    totals = session_totals(pool, host, started_at, hashes)
+    totals = session_totals(pool, started_at, now, hashes)
     return {
-        "status": _status_band(snapshot, last_served_at, now),
+        "status": _status_band(snapshot, last_served_at, now, freshness_seconds),
         "resources": {"thermal_state": snapshot.get("thermal_state"),
                       "memory_pressure": snapshot.get("memory_pressure"),
                       "cpu_usage": snapshot.get("cpu_usage")},
@@ -92,4 +131,5 @@ def build_card(pool: ConnectionPool, host: str, daemon: Row | None,
                  "tokens": totals["tokens"], "token_requests": totals["requests"],
                  "started_at": started_at or None, "last_served_at": last_served_at},
         "slots": list(snapshot.get("slots") or []),
+        "last_model_load_error": _load_error(snapshot, now),
     }

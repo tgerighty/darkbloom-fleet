@@ -76,11 +76,16 @@ happened and why.
   metrics DB (`~/.darkbloom-widget/metrics.db` - thermal state, memory
   pressure, CPU, fan, peak temperature) plus the daemon's own `capacity`
   and `slots` sections; a missing or malformed widget row degrades to empty
-  card fields rather than failing the read.
+  card fields rather than failing the read. A second SSH command
+  (`~/.darkbloom/bin/darkbloom models list --all --json`) lists on-disk
+  models; scoring uses the intersection with `DARKBLOOM_HOST_<N>_MODELS`.
+  A failed inventory read leaves daemon state intact and falls back to the
+  configured allow-list for that tick.
 - **Guardrails**: EMA-smoothed switching (see "Credit" above), a 30-minute
-  minimum dwell, idle-gating before any real restart, and a 30-second
-  restart-retry backoff after a failed switch attempt. Defaults and
-  rationale are in `CONFIG.md`.
+  minimum dwell, idle-gating before any real restart, a 30-second
+  restart-retry backoff after a failed switch attempt, and pre-switch host
+  gates (hot thermal, non-hardware trust, recent load error for the target).
+  Defaults and rationale are in `CONFIG.md`.
 - **Deployment**: the cluster runs the Swarm stack in `deploy/stack.yml`,
   released by nxio-deploy (see CONFIG.md "Running on the cluster");
   `docker-compose.yml` runs the same app locally.
@@ -118,9 +123,6 @@ collector only logs what it would launch.
 ## Deferred to a follow-up (explicitly out of v1 scope)
 
 - LLM-driven decision-making (today's heuristic is the scored formula above).
-- Discovering which models are actually downloaded/loadable on each host via
-  `darkbloom models list` over SSH - each host scores a fixed configured model
-  list (`DARKBLOOM_HOST_<N>_MODELS`) instead.
 
 ## Running locally
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# A last_model_load_error this recent blocks a switch to that same model.
+LOAD_ERROR_BLOCK_SECONDS = 120
+
 
 @dataclass(frozen=True)
 class CapacitySample:
@@ -45,6 +48,14 @@ class DaemonState:
     gpu_cache_gb: float | None = None
     total_memory_gb: float | None = None
     slots: tuple[Slot, ...] = ()  # one entry per model the daemon keeps resident
+    # Last failed model load from daemon-state.json; each field is None when
+    # the object is missing, malformed, or that value is non-finite.
+    last_model_load_error_model: str | None = None
+    last_model_load_error_message: str | None = None
+    last_model_load_error_at: float | None = None  # absolute unix timestamp
+    # Local-cache ids from `darkbloom models list --all --json`. None = unknown
+    # this tick; () = verified empty. Presence of an id means on disk.
+    installed_models: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,7 @@ see config.load_configs for why the rest of the app stays single-host-shaped.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,7 @@ from . import queries
 from .config import Config
 from .scheduler import run_forever
 
+log = logging.getLogger("fleet.web")
 STATIC_DIR = Path(__file__).parent / "static"
 # The page's JS and the API ship in the same image: a browser that keeps a
 # cached module across a deploy renders the new API's data with the old code
@@ -62,7 +64,44 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     # validation model from the annotation.
     @app.get("/api/status", response_model=None)
     async def status() -> dict[str, list[queries.Row]]:
-        statuses = await asyncio.gather(*(asyncio.to_thread(queries.build_status, cfg, pool) for cfg in configs))
+        # Attribution and the self-route view are account-wide: query once,
+        # then every host row reads the same mapping.
+        try:
+            attributed, self_route = await asyncio.to_thread(queries.shared_status_data, pool)
+        except Exception:
+            log.exception("shared status data failed")
+            return {"hosts": [_error_host(cfg) for cfg in configs]}
+        statuses = await asyncio.gather(
+            *(asyncio.to_thread(_status_row, cfg, pool, attributed, self_route) for cfg in configs)
+        )
         return {"hosts": list(statuses)}
 
     return app
+
+
+def _error_host(cfg: Config) -> queries.Row:
+    return {
+        "host": {"label": getattr(cfg, "host_label", "host"), "spec": getattr(cfg, "host_spec", "")},
+        "mode": "LIVE" if getattr(cfg, "live_execution", False) else "OBSERVE",
+        "current_model": None,
+        "inference_active": None,
+        "as_of": None,
+        "demand": [],
+        "recent_decisions": [],
+        "recent_earnings": [],
+        "serving": {},
+        "card": None,
+        "routability": None,
+        "hourly_jobs": None,
+        "unattributed_recent": 0,
+        "error": "status unavailable",
+    }
+
+
+def _status_row(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
+                self_route: tuple[float | None, dict[str, int]]) -> queries.Row:
+    try:
+        return queries.build_status(cfg, pool, attributed, self_route)
+    except Exception:
+        log.exception("host status failed: %s", getattr(cfg, "host_label", "host"))
+        return _error_host(cfg)

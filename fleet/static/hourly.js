@@ -8,7 +8,8 @@ const SPC = " ";
 const GAP = "  ";
 const COL_GAP = "    ";
 const NL = "\n";
-const FOLD = '<details class="fold" open><summary>Jobs · hourly buckets · 24 h</summary>';
+const FOLD = '<details class="fold" open data-fold="hourly"><summary>Jobs · hourly buckets · 24 h</summary>' +
+  '<div class="sub">Each letter is a payout-bearing 90-second portion, not GPU busy time.</div>';
 const EMPTY = { legend: [], rows: [] };
 
 function esc(value) {
@@ -49,12 +50,12 @@ const DOT = '<span class="gap">.</span>';
 
 function bucketHtml(row, legend) {
   const byModel = Object.fromEntries(legend.map(function (entry) { return [entry.model, entry]; }));
-  const portions = row.portions || [];
+  const portions = (row.portions || []).slice(0, BAR_WIDTH);
   const bar = portions.map(function (model) {
     const entry = byModel[model];
     return entry ? span(entry.slot, entry.letter) : DOT;
   }).join("");
-  return bar + SPC.repeat(BAR_WIDTH - portions.length) + COL_GAP +
+  return bar + SPC.repeat(Math.max(0, BAR_WIDTH - portions.length)) + COL_GAP +
     (row.serving_percentage ?? 0) + "% / " + (row.idle_percentage ?? 0) + "%";
 }
 

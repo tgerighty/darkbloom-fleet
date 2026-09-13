@@ -1,5 +1,19 @@
 # Progress
 
+- ~~[NOW] [FIX] Release gates: freshness, inventory re-check, bounded serving, future timestamps, proposed badge~~
+  (2026-09-13: watcher mirrors LIVE written_at freshness; inventory is
+  re-checked immediately before every real start; serving_percentages reads
+  30 days plus the left-boundary row and a lifetime LEAD aggregate; future
+  load errors stay blocked; missing trust keeps the current model; each
+  healthy card shows KEEP or the proposed target under LIVE/OBSERVE)
+- ~~[NOW] [REFACTOR] Share account-wide /api/status maps and one serving history per host~~
+  (2026-09-13: provider_hosts and latest_self_route once per GET; each host
+  derives 1h/7h/24h/30d/lifetime serving from one daemon_snapshots read)
+- ~~[NOW] [FEATURE] Dashboard glance, resilient refresh, and declutter~~
+  (2026-09-13: current model, serving/idle, and latest decision on the band
+  with OBSERVE would-switch; preserve details/scroll/focus across redraw;
+  isolate a bad host or poll; clamp hourly portions; remove placeholder
+  chrome; hosts sit above demand; serving window is global)
 - [NOW] [FEATURE] "Jobs · hourly buckets" panel per host card (PR #6):
   last-24 h attributed payout counts bucketed by hour with a letter legend
   and range share (`hourly_jobs` in /api/status, fleet/hourly.py), the
@@ -7,6 +21,9 @@
   row counts (fleet/static/hourly.js); also fixes the self-referential
   SPAN_END/SPAN_DIV_END constants 774217a left in dashboard.js (TDZ crash
   on page load)
+- ~~[NOW] [FEATURE] Persist last_model_load_error and pre-switch host gates~~
+  (thermal serious/critical BLOCKED, non-hardware trust KEEP, recent matching
+  load error BLOCKED; same in OBSERVE and LIVE; card surfaces the error)
 - [NOW] [FEATURE] [IN-PROGRESS] Console-style per-host cards matching the
   darkbloom.dev "Your fleet" page: widget metrics + daemon capacity/slots
   ingested in the daemon-state SSH round trip (new daemon_snapshots columns),

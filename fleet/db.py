@@ -57,6 +57,11 @@ ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS total_memory_gb DOUBLE PRE
 -- One JSON array of {model, kv_backend, mtp_enabled, mtp_active, mtp_inactive_reason}
 -- per snapshot: the daemon's resident model slots for the backend-slots panel.
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS slots JSONB;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_model TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_message TEXT;
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_at DOUBLE PRECISION;
+-- Nullable: NULL = inventory unknown this tick; '{}' = verified empty cache.
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS installed_models TEXT[];
 
 -- One row per model the coordinator will route to on our machines, per probe.
 -- A probe that found nothing routable writes one row with model = '' so the
@@ -133,19 +138,35 @@ def insert_demand_samples(pool: ConnectionPool, host: str, observed_at: float,
         )
 
 
+def update_snapshot_installed_models(
+    pool: ConnectionPool, host: str, observed_at: float, installed: tuple[str, ...],
+) -> None:
+    """Fill installed_models on the snapshot just inserted for this tick."""
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE daemon_snapshots SET installed_models = %s WHERE host = %s AND observed_at = %s",
+            (list(installed), host, observed_at),
+        )
+
+
 def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, daemon: DaemonState) -> None:
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO daemon_snapshots (host, observed_at, current_model, warm_models, "
             "inference_active, fresh, pid, started_at, advertised_models, requests_served, "
             "trust_level, trust_reason, thermal_state, memory_pressure, cpu_usage, fan_rpm, "
-            "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, slots) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, "
+            "last_model_load_error_model, last_model_load_error_message, last_model_load_error_at, "
+            "installed_models, slots) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
              daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
              list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason,
              daemon.thermal_state, daemon.memory_pressure, daemon.cpu_usage, daemon.fan_rpm,
              daemon.peak_temperature_c, daemon.gpu_active_gb, daemon.gpu_cache_gb, daemon.total_memory_gb,
+             daemon.last_model_load_error_model, daemon.last_model_load_error_message,
+             daemon.last_model_load_error_at,
+             None if daemon.installed_models is None else list(daemon.installed_models),
              Jsonb([dataclasses.asdict(s) for s in daemon.slots])),
         )
 
@@ -185,6 +206,19 @@ def load_ema(pool: ConnectionPool, host: str) -> tuple[dict[str, float], float]:
     if not rows:
         return {}, 0.0
     return {r["model"]: r["value"] for r in rows}, max(r["updated_at"] for r in rows)
+
+
+def delete_ineligible_ema(pool: ConnectionPool, host: str, eligible: frozenset[str]) -> None:
+    """Drop ema_state rows for this host that are not in eligible. Does not
+    bump updated_at on the rows that remain. An empty set deletes every row."""
+    with pool.connection() as conn:
+        if eligible:
+            conn.execute(
+                "DELETE FROM ema_state WHERE host = %s AND NOT (model = ANY(%s))",
+                (host, list(eligible)),
+            )
+        else:
+            conn.execute("DELETE FROM ema_state WHERE host = %s", (host,))
 
 
 def save_ema(pool: ConnectionPool, host: str, ema: dict[str, float], updated_at: float) -> None:

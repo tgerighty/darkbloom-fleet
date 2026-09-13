@@ -48,8 +48,40 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
                                      "nominal", 0.41, 0.12, 1780.0, 62.5, 14.8, 1.2, 64.0)
     assert pool.calls[0][1][-1].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
                                          "mtp_active": False, "mtp_inactive_reason": "idle"}]
+    assert pool.calls[0][1][20:23] == (None, None, None)
+    assert pool.calls[0][1][23] is None
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None)
     assert pool.calls[2][1] == ("live", True, None, 9)
+
+
+def test_daemon_snapshots_persist_last_model_load_error(fake_pool):
+    pool = fake_pool()
+    daemon = DaemonState("m", ("m",), False, 1, 0.5, True, last_model_load_error_model="n",
+                         last_model_load_error_message="oom", last_model_load_error_at=99.0)
+    db.insert_daemon_snapshot(pool, "h", 1.0, daemon)
+    sql, row = pool.calls[0]
+    assert "last_model_load_error_model" in sql
+    assert "last_model_load_error_message" in sql
+    assert "last_model_load_error_at" in sql
+    assert row[20:23] == ("n", "oom", 99.0)
+    assert "last_model_load_error_model" in db.SCHEMA_SQL
+    assert "last_model_load_error_at" in db.SCHEMA_SQL
+
+
+def test_daemon_snapshots_persist_nullable_installed_models(fake_pool):
+    known = fake_pool()
+    db.insert_daemon_snapshot(
+        known, "h", 1.0, DaemonState("m", ("m",), False, 1, 0.5, True, installed_models=("a", "b")))
+    empty = fake_pool()
+    db.insert_daemon_snapshot(
+        empty, "h", 1.0, DaemonState("m", ("m",), False, 1, 0.5, True, installed_models=()))
+    unknown = fake_pool()
+    db.insert_daemon_snapshot(unknown, "h", 1.0, DaemonState("m", ("m",), False, 1, 0.5, True))
+    assert known.calls[0][1][23] == ["a", "b"]
+    assert empty.calls[0][1][23] == []
+    assert unknown.calls[0][1][23] is None
+    assert "installed_models TEXT[]" in db.SCHEMA_SQL
+    assert "installed_models TEXT[] NOT NULL" not in db.SCHEMA_SQL
 
 
 def test_self_route_samples_record_an_empty_probe_too(fake_pool):
@@ -65,6 +97,29 @@ def test_reads_fall_back_to_zero_when_the_tables_are_empty(fake_pool):
     assert db.load_ema(pool, "h") == ({}, 0.0)
     assert db.dwell_anchor(pool, "h", 0.0) == 0.0
     assert db.last_failed_switch_at(pool, "h") == 0.0
+
+
+def test_delete_ineligible_ema_drops_models_outside_the_set(fake_pool):
+    pool = fake_pool()
+    db.delete_ineligible_ema(pool, "h", frozenset({"a", "b"}))
+    sql, params = pool.calls[0]
+    assert "DELETE FROM ema_state" in sql
+    assert "NOT (model = ANY(%s))" in sql
+    assert params[0] == "h" and set(params[1]) == {"a", "b"}
+    empty = fake_pool()
+    db.delete_ineligible_ema(empty, "h", frozenset())
+    empty_sql, empty_params = empty.calls[0]
+    assert "DELETE FROM ema_state WHERE host = %s" in empty_sql
+    assert "ANY" not in empty_sql
+    assert empty_params == ("h",)
+
+
+def test_update_snapshot_installed_models_targets_the_tick_row(fake_pool):
+    pool = fake_pool()
+    db.update_snapshot_installed_models(pool, "h", 1.0, ("a", "b"))
+    sql, params = pool.calls[0]
+    assert "UPDATE daemon_snapshots SET installed_models = %s" in sql
+    assert params == (["a", "b"], "h", 1.0)
 
 
 def test_reads_return_the_stored_values(fake_pool):

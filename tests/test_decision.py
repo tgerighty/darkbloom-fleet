@@ -1,7 +1,7 @@
 import math
 
-from fleet.decision import decide, update_ema
-from fleet.types import Guardrails
+from fleet.decision import apply_host_gates, apply_inventory_gate, decide, update_ema
+from fleet.types import DaemonState, Decision, Guardrails, LOAD_ERROR_BLOCK_SECONDS
 
 GUARDRAILS = Guardrails(relative_margin=0.25, absolute_margin=0.01, switch_cost_seconds=300.0,
                         decision_horizon_seconds=3600.0, min_dwell_seconds=1800.0)
@@ -71,3 +71,119 @@ def test_decide_marks_switch_when_idle_while_the_provider_is_serving_a_request()
     result = decide({"a": 1.0, "b": 2.0}, current_model="a", last_switch_at=0, now=10_000,
                     inference_active=True, guardrails=GUARDRAILS)
     assert result.target == "b" and result.action == "SWITCH_WHEN_IDLE" and "idle" in result.reason
+
+
+NOW = 10_000.0
+SWITCH = Decision("b", "b clears margin", "SWITCH")
+WHEN_IDLE = Decision("b", "waiting for idle", "SWITCH_WHEN_IDLE")
+
+
+def _daemon(**fields) -> DaemonState:
+    return DaemonState("a", ("a",), False, 1, 0.0, True, **fields)
+
+
+def test_serious_or_critical_thermal_blocks_a_switch():
+    for thermal in ("serious", "critical"):
+        result = apply_host_gates(SWITCH, _daemon(thermal_state=thermal), NOW)
+        assert result.action == "BLOCKED" and result.target == "b"
+        assert thermal in result.reason
+
+
+def test_thermal_also_blocks_switch_when_idle():
+    result = apply_host_gates(WHEN_IDLE, _daemon(thermal_state="serious"), NOW)
+    assert result.action == "BLOCKED" and "serious" in result.reason
+
+
+def test_nominal_thermal_does_not_block():
+    result = apply_host_gates(SWITCH, _daemon(trust_level="hardware", thermal_state="nominal"), NOW)
+    assert result == SWITCH
+
+
+def test_keep_and_wait_pass_through_even_when_thermal_is_critical():
+    keep = Decision("a", "ranks first", "KEEP")
+    wait = Decision(None, "no scored models yet", "WAIT")
+    hot = _daemon(thermal_state="critical")
+    assert apply_host_gates(keep, hot, NOW) is keep
+    assert apply_host_gates(wait, hot, NOW) is wait
+
+
+def test_non_hardware_trust_keeps_current_and_does_not_restart():
+    result = apply_host_gates(SWITCH, _daemon(trust_level="self_signed"), NOW)
+    assert result.action == "KEEP" and result.target == "a"
+    assert "self_signed" in result.reason and "attestation" in result.reason
+
+
+def test_absent_trust_keeps_current_and_does_not_count_as_hardware():
+    result = apply_host_gates(SWITCH, _daemon(), NOW)
+    assert result.action == "KEEP" and result.target == "a"
+    assert "unknown" in result.reason and "not hardware" in result.reason
+
+
+def test_hardware_trust_leaves_a_switch_in_place():
+    result = apply_host_gates(SWITCH, _daemon(trust_level="hardware"), NOW)
+    assert result == SWITCH
+
+
+def test_a_recent_load_error_for_the_target_blocks():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
+                     last_model_load_error_message="oom", last_model_load_error_at=NOW - 5)
+    result = apply_host_gates(SWITCH, daemon, NOW)
+    assert result.action == "BLOCKED" and result.target == "b"
+    assert "b" in result.reason and "load" in result.reason
+
+
+def test_a_load_error_at_the_120s_boundary_blocks():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
+                     last_model_load_error_at=NOW - LOAD_ERROR_BLOCK_SECONDS)
+    assert apply_host_gates(SWITCH, daemon, NOW).action == "BLOCKED"
+
+
+def test_a_load_error_older_than_120s_does_not_block():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
+                     last_model_load_error_at=NOW - LOAD_ERROR_BLOCK_SECONDS - 0.001)
+    assert apply_host_gates(SWITCH, daemon, NOW) == SWITCH
+
+
+def test_a_load_error_for_another_model_does_not_block():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="c",
+                     last_model_load_error_at=NOW - 1)
+    assert apply_host_gates(SWITCH, daemon, NOW) == SWITCH
+
+
+def test_a_load_error_without_at_blocks():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
+                     last_model_load_error_message="oom")
+    result = apply_host_gates(SWITCH, daemon, NOW)
+    assert result.action == "BLOCKED" and "no timestamp" in result.reason
+
+
+def test_a_slightly_future_load_error_still_blocks():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
+                     last_model_load_error_at=NOW + 2)
+    assert apply_host_gates(SWITCH, daemon, NOW).action == "BLOCKED"
+
+
+def test_a_far_future_load_error_blocks():
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
+                     last_model_load_error_at=NOW + LOAD_ERROR_BLOCK_SECONDS + 1)
+    assert apply_host_gates(SWITCH, daemon, NOW).action == "BLOCKED"
+
+
+def test_unknown_inventory_keeps_current_instead_of_switching():
+    result = apply_inventory_gate(SWITCH, _daemon(installed_models=None))
+    assert result.action == "KEEP" and result.target == "a"
+    assert "inventory unknown" in result.reason
+    idle = apply_inventory_gate(WHEN_IDLE, _daemon())
+    assert idle.action == "KEEP" and idle.target == "a"
+
+
+def test_a_known_target_absent_from_installed_ids_is_blocked():
+    result = apply_inventory_gate(SWITCH, _daemon(installed_models=("a",)))
+    assert result.action == "BLOCKED" and result.target == "b"
+    assert "not installed" in result.reason
+
+
+def test_a_known_installed_target_is_not_blocked_by_inventory():
+    assert apply_inventory_gate(SWITCH, _daemon(installed_models=("a", "b"))) == SWITCH
+    keep = Decision("a", "ranks first", "KEEP")
+    assert apply_inventory_gate(keep, _daemon(installed_models=None)) is keep

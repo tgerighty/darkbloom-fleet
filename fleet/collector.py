@@ -4,6 +4,7 @@ that part only, matching the source project's per-source resilience.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 
@@ -23,6 +24,24 @@ def _fetch_daemon(cfg: Config, now: float) -> DaemonState | None:
     except Exception as error:  # noqa: BLE001 - one bad tick must not kill the loop
         log.warning("daemon state unavailable: %s", error)
         return None
+
+
+def _fetch_installed(cfg: Config) -> tuple[str, ...] | None:
+    """Verified on-disk ids, or None when inventory is unknown this tick."""
+    try:
+        return remote.fetch_installed_models(cfg)
+    except Exception as error:  # noqa: BLE001 - must not stall or fail daemon state
+        log.warning("installed-model inventory unknown: %s", error)
+        return None
+
+
+def _eligible_models(configured: tuple[str, ...], installed: tuple[str, ...] | None) -> frozenset[str]:
+    """Configured allow-list, intersected with on-disk ids when inventory is
+    known. Unknown inventory still scores the allow-list; apply_inventory_gate
+    forbids SWITCH until inventory is known. Disk-only ids are never enrolled."""
+    if installed is None:
+        return frozenset(configured)
+    return frozenset(configured) & frozenset(installed)
 
 
 def _fetch_scores(cfg: Config) -> tuple[dict[str, CapacitySample], dict[str, float]]:
@@ -82,22 +101,35 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
         decision_horizon_seconds=cfg.decision_horizon_seconds,
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
-    return decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    result = decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    result = decision_mod.apply_host_gates(result, daemon, now)
+    return decision_mod.apply_inventory_gate(result, daemon)
 
 
 def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: float) -> tuple[bool, str | None]:
     """Live mode only. Returns (executed, error). The restart-retry backoff is
     applied by the caller before storing the decision, so a deferred switch
-    never reaches here as a SWITCH."""
+    never reaches here as a SWITCH. Re-runs thermal/trust/load-error on a
+    fresh daemon read, then re-checks on-disk inventory before the start."""
     if decision.action != "SWITCH" or not cfg.live_execution:
         return False, None
-    fresh_daemon = _fetch_daemon(cfg, time.time())
+    fresh_now = time.time()
+    fresh_daemon = _fetch_daemon(cfg, fresh_now)
     if not fresh_daemon or not fresh_daemon.fresh or fresh_daemon.inference_active:
         return False, "aborted: provider is not confirmed fresh and idle immediately before the switch"
+    gated = decision_mod.apply_host_gates(decision, fresh_daemon, fresh_now)
+    if gated.action != "SWITCH":
+        return False, "aborted: host safety gate failed on the fresh daemon read"
+    installed = _fetch_installed(cfg)
+    gated = decision_mod.apply_inventory_gate(
+        gated, dataclasses.replace(fresh_daemon, installed_models=installed))
+    if gated.action != "SWITCH" or gated.target is None:
+        return False, "aborted: inventory gate failed on the fresh read"
     try:
-        remote.execute_switch(cfg, decision.target)
+        remote.execute_switch(cfg, gated.target)
     except Exception as error:  # noqa: BLE001
-        return False, str(error)
+        log.warning("switch execution failed: %s", error)
+        return False, "switch failed"
     return True, None
 
 
@@ -126,30 +158,53 @@ def _maybe_launch_fast_poll(cfg: Config, decision: Decision) -> None:
         log.warning("fast-poll watcher control failed: %s", error)
 
 
+def _persist_tick_daemon(
+    cfg: Config, pool: ConnectionPool, host: str, now: float,
+) -> tuple[DaemonState | None, tuple[str, ...] | None]:
+    """Insert the daemon row as soon as it is readable. Inventory is a second
+    SSH and must not stall that insert, or run at all when the daemon read
+    failed. Scoring uses the in-memory installed ids."""
+    daemon = _fetch_daemon(cfg, now)
+    if daemon is None:
+        return None, None
+    db.insert_daemon_snapshot(pool, host, now, daemon)
+    installed = _fetch_installed(cfg)
+    if installed is not None:
+        db.update_snapshot_installed_models(pool, host, now, installed)
+    return dataclasses.replace(daemon, installed_models=installed), installed
+
+
 def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     now = time.time()
     host = cfg.host_id
 
-    daemon = _fetch_daemon(cfg, now)
-    if daemon is not None:
-        db.insert_daemon_snapshot(pool, host, now, daemon)
+    daemon, installed = _persist_tick_daemon(cfg, pool, host, now)
     _probe_self_route(cfg, pool, now)
     _ingest_earnings(cfg, pool, now)
 
+    current = daemon.current_model if daemon else None
+    eligible = _eligible_models(cfg.models, installed)
+    db.delete_ineligible_ema(pool, host, eligible)
+    if not eligible:
+        # Verified empty cache, or no overlap with the allow-list: do not
+        # score disk-only models and do not advance EMA freshness.
+        _record_and_act(cfg, pool, Decision(None, "no eligible installed models", "WAIT"), current, now)
+        return
+
     samples, prices = _fetch_scores(cfg)
+    samples = {model: sample for model, sample in samples.items() if model in eligible}
     scores = scoring.compute_scores(samples, prices, cfg.weights)
     if not scores:
         # No scored models this tick: leave the stored EMA and its timestamp
         # untouched (saving now would fake a fresh dt on the next real update)
         # and wait rather than score stale data.
-        result = Decision(None, "demand feeds unavailable", "WAIT")
-        _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
+        _record_and_act(cfg, pool, Decision(None, "demand feeds unavailable", "WAIT"), current, now)
         return
 
     ema_prev, last_updated = db.load_ema(pool, host)
-    # A model removed from DARKBLOOM_HOST_<N>_MODELS must not survive in the
-    # restored EMA — its stale score could still win a decision.
-    ema_prev = {model: value for model, value in ema_prev.items() if model in cfg.models}
+    # A model removed from DARKBLOOM_HOST_<N>_MODELS or missing from disk
+    # must not survive in the restored EMA — its stale score could still win.
+    ema_prev = {model: value for model, value in ema_prev.items() if model in eligible}
     dt = max(1.0, now - last_updated) if last_updated else cfg.poll_interval_seconds
     ema = decision_mod.update_ema(ema_prev, scores, dt, cfg.ema_tau_minutes)
     if ema:
@@ -157,7 +212,7 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     db.insert_demand_samples(pool, host, now, samples, scores, prices, ema)
 
     result = _decide(cfg, pool, ema, daemon, now)
-    _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
+    _record_and_act(cfg, pool, result, current, now)
 
 
 def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current_model: str | None, now: float) -> None:

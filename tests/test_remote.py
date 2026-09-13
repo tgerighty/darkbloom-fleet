@@ -2,6 +2,7 @@
 other tests swap subprocess.run or _run_ssh, so none of this needs a network."""
 import dataclasses
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -150,11 +151,27 @@ def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
     assert "(7,)" in commands[0]
 
 
+def test_empty_provider_hash_is_stored_as_null(monkeypatch):
+    _capture(monkeypatch, '[[8, "a", null, 30, 1.5, ""]]')
+    assert remote.fetch_new_payouts(_cfg(False), since_rowid=7)[0].provider_hash is None
+
+
 def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
     commands = _capture(monkeypatch)
     remote.execute_switch(_cfg(True), "gpt-oss-20b")
     remote.clear_fast_switch_target(_cfg(True))
-    assert commands == ["darkbloom start --model gpt-oss-20b --idle-timeout 0", f"rm -f {remote.FAST_SWITCH_STATE_PATH}"]
+    assert commands == [
+        f"{remote.DARKBLOOM_BIN} start --model gpt-oss-20b --idle-timeout 0",
+        f"rm -f {remote.FAST_SWITCH_STATE_PATH}",
+    ]
+
+
+def test_live_switch_uses_the_watcher_binary_path_and_quotes_the_model(monkeypatch):
+    commands = _capture(monkeypatch)
+    remote.execute_switch(_cfg(True), "gpt oss; rm")
+    assert Path(remote.DARKBLOOM_BIN).expanduser() == Path.home() / ".darkbloom" / "bin" / "darkbloom"
+    assert commands == [f"{remote.DARKBLOOM_BIN} start --model 'gpt oss; rm' --idle-timeout 0"]
+    assert "models list" not in remote._STATE_COMMAND
 
 
 def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):
@@ -171,6 +188,24 @@ def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monk
     moves = [i for i, line in enumerate(lines) if line.startswith("mv -f ")]
     assert lines[0] == "set -e"
     assert len(moves) == 2 and max(moves) < launch
+    assert '"daemon_freshness_seconds": 90.0' in commands[0]
+
+
+def test_inventory_fetch_is_a_separate_all_json_list_command(monkeypatch):
+    commands = _capture(
+        monkeypatch,
+        '{"cacheDirectory": "/x", "filteredByConfig": false, "models": [{"id": "a"}, {"id": "a"}]}',
+    )
+    assert remote.fetch_installed_models(_cfg(False)) == ("a",)
+    assert commands == [remote._INVENTORY_COMMAND]
+    assert remote._INVENTORY_COMMAND == f"{remote.DARKBLOOM_BIN} models list --all --json"
+    assert "models list" not in remote._STATE_COMMAND
+
+
+def test_inventory_fetch_rejects_malformed_json(monkeypatch):
+    _capture(monkeypatch, "not json")
+    with pytest.raises(RuntimeError, match="malformed"):
+        remote.fetch_installed_models(_cfg(False))
 
 
 def test_non_finite_widget_values_are_dropped():
@@ -178,3 +213,31 @@ def test_non_finite_widget_values_are_dropped():
     assert _optional_float({"x": float("nan")}, "x") is None
     assert _optional_float({"x": float("inf")}, "x") is None
     assert _optional_float({"x": "0.5"}, "x") == 0.5
+
+
+def test_fetch_daemon_state_reads_last_model_load_error(monkeypatch):
+    _capture(monkeypatch, _state_output(
+        '{"current_model": "a", "warm_models": ["a"], "written_at": 1000, '
+        '"last_model_load_error": {"model": "b", "message": "oom", "at": 990}}'))
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert (state.last_model_load_error_model, state.last_model_load_error_message,
+            state.last_model_load_error_at) == ("b", "oom", 990.0)
+
+
+def test_malformed_last_model_load_error_degrades_to_nulls_and_keeps_the_read(monkeypatch):
+    prefix = '{"current_model": "a", "warm_models": ["a"], "written_at": 1000, "last_model_load_error": '
+    cases = {
+        '"oops"}': (None, None, None),
+        "[]}": (None, None, None),
+        "1}": (None, None, None),
+        '{"model": "", "message": "", "at": null}}': (None, None, None),
+        '{"model": "b", "message": "x", "at": "nan"}}': ("b", "x", None),
+        '{"model": "b", "message": "x", "at": "inf"}}': ("b", "x", None),
+        '{"at": "nope"}}': (None, None, None),
+    }
+    for blob, expected in cases.items():
+        _capture(monkeypatch, _state_output(prefix + blob))
+        state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+        assert state.current_model == "a"
+        assert (state.last_model_load_error_model, state.last_model_load_error_message,
+                state.last_model_load_error_at) == expected

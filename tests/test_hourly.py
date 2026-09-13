@@ -20,7 +20,7 @@ def test_with_no_free_letter_in_the_name_the_alphabet_decides():
 
 
 def test_no_rows_means_an_empty_panel(fake_pool):
-    empty = hourly.hourly_jobs(fake_pool([]), "h", ["s1"], 10_000.0)
+    empty = hourly.hourly_jobs(fake_pool([]), ["s1"], 10_000.0)
     assert empty["legend"] == []
     assert len(empty["rows"]) == 24
     assert empty["rows"][1]["portions"] == [None] * 40
@@ -32,7 +32,7 @@ def test_buckets_letters_and_range_share(fake_pool):
             {"hour": 93_600.0, "portion": 1, "model": "gemma-4-26b-qat", "n": 3},
             {"hour": 93_600.0, "portion": 3, "model": "gpt-oss-20b", "n": 2}]
     pool = fake_pool(rows)
-    panel = hourly.hourly_jobs(pool, "h", ["s1"], 100_000.0)
+    panel = hourly.hourly_jobs(pool, ["s1"], 100_000.0)
     # gemma and gpt-oss first appear in the older bucket, so gemma claims G.
     assert panel["legend"] == [{"letter": "G", "model": "gemma-4-26b-qat"},
                                {"letter": "O", "model": "gpt-oss-20b"},
@@ -46,7 +46,9 @@ def test_buckets_letters_and_range_share(fake_pool):
     assert len(panel["rows"]) == 24
     assert panel["rows"][2]["portions"] == [None] * 40
     assert panel["rows"][-1]["hour"] == 97_200 - 23 * 3_600
-    assert pool.calls == [(hourly._HOURLY_SQL, ("h", 97_200 - 23 * 3_600, 100_000.0, ["s1"]))]
+    assert "DISTINCT ON (payout_rowid)" in hourly._HOURLY_SQL
+    assert "host = %s" not in hourly._HOURLY_SQL
+    assert pool.calls == [(hourly._HOURLY_SQL, (97_200 - 23 * 3_600, 100_000.0, ["s1"]))]
 
 
 def test_more_than_36_models_share_the_overflow_glyph():
@@ -59,6 +61,20 @@ def test_more_than_36_models_share_the_overflow_glyph():
 
 def test_exact_hour_boundary_has_no_phantom_idle_portion_and_ignores_future_rows(fake_pool):
     future = [{"hour": 100_800.0, "portion": 0, "model": "a", "n": 1}]
-    panel = hourly.hourly_jobs(fake_pool(future), "h", ["s1"], 97_200.0)
+    panel = hourly.hourly_jobs(fake_pool(future), ["s1"], 97_200.0)
     assert panel["rows"][0] == {"hour": 97_200, "jobs": 0, "portions": [],
                                 "serving_percentage": 0, "idle_percentage": 0}
+
+
+def test_current_hour_includes_the_in_progress_portion_at_each_90s_boundary(fake_pool):
+    hour = 97_200.0
+    rows = [{"hour": hour, "portion": 1, "model": "a", "n": 1}]
+    panel = hourly.hourly_jobs(fake_pool(rows), ["s1"], hour + 90.0)
+    current = panel["rows"][0]
+    assert current["hour"] == hour
+    assert current["portions"] == [None, "a"]
+    assert current["jobs"] == 1
+    assert current["serving_percentage"] == 50
+    later = hourly.hourly_jobs(fake_pool(rows), ["s1"], hour + 180.0)
+    assert len(later["rows"][0]["portions"]) == 3
+    assert later["rows"][0]["portions"][1] == "a"
