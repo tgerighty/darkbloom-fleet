@@ -99,6 +99,29 @@ def test_reads_fall_back_to_zero_when_the_tables_are_empty(fake_pool):
     assert db.last_failed_switch_at(pool, "h") == 0.0
 
 
+def test_delete_ineligible_ema_drops_models_outside_the_set(fake_pool):
+    pool = fake_pool()
+    db.delete_ineligible_ema(pool, "h", frozenset({"a", "b"}))
+    sql, params = pool.calls[0]
+    assert "DELETE FROM ema_state" in sql
+    assert "NOT (model = ANY(%s))" in sql
+    assert params[0] == "h" and set(params[1]) == {"a", "b"}
+    empty = fake_pool()
+    db.delete_ineligible_ema(empty, "h", frozenset())
+    empty_sql, empty_params = empty.calls[0]
+    assert "DELETE FROM ema_state WHERE host = %s" in empty_sql
+    assert "ANY" not in empty_sql
+    assert empty_params == ("h",)
+
+
+def test_update_snapshot_installed_models_targets_the_tick_row(fake_pool):
+    pool = fake_pool()
+    db.update_snapshot_installed_models(pool, "h", 1.0, ("a", "b"))
+    sql, params = pool.calls[0]
+    assert "UPDATE daemon_snapshots SET installed_models = %s" in sql
+    assert params == (["a", "b"], "h", 1.0)
+
+
 def test_reads_return_the_stored_values(fake_pool):
     ema_rows = [{"model": "a", "value": 0.3, "updated_at": 5.0}, {"model": "b", "value": 0.1, "updated_at": 7.0}]
     pool = fake_pool([{"m": 12}], ema_rows, [{"t": 100.0}], [{"t": 50.0}])

@@ -17,7 +17,8 @@ def watcher(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     paths = {"LOCK_FILE": "lock", "FAILED_AT_FILE": "failed-at", "TARGET_STATE_PATH": "state.json",
-             "LOG": "fast_switch.log", "DAEMON_STATE_PATH": "daemon-state.json"}
+             "LOG": "fast_switch.log", "DAEMON_STATE_PATH": "daemon-state.json",
+             "WIDGET_METRICS_DB_PATH": "metrics.db"}
     for name, filename in paths.items():
         monkeypatch.setattr(module, name, tmp_path / filename)
     monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
@@ -90,14 +91,18 @@ def test_main_waits_out_the_failure_backoff(watcher, monkeypatch):
 
 def test_main_logs_a_timeout_when_no_idle_gap_opens(watcher, monkeypatch):
     _target(watcher, max_seconds=0.05)
-    monkeypatch.setattr(watcher, "read_daemon_state", lambda: {"current_model": "a", "inference_active": True})
+    monkeypatch.setattr(watcher, "read_daemon_state",
+                        lambda: {"current_model": "a", "inference_active": True,
+                                 "trust": {"trust_level": "hardware"}})
     watcher.main()
     assert "timed out" in watcher.LOG.read_text()
 
 
 def test_main_records_a_failed_switch_for_the_backoff(watcher, monkeypatch):
     _target(watcher, max_seconds=5)
-    monkeypatch.setattr(watcher, "read_daemon_state", lambda: {"current_model": "a", "inference_active": False})
+    monkeypatch.setattr(watcher, "read_daemon_state",
+                        lambda: {"current_model": "a", "inference_active": False,
+                                 "trust": {"trust_level": "hardware"}})
     monkeypatch.setattr(watcher, "execute_switch", lambda target: False)
     watcher.main()
     assert watcher.FAILED_AT_FILE.exists()

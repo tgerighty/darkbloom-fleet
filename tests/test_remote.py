@@ -151,6 +151,11 @@ def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
     assert "(7,)" in commands[0]
 
 
+def test_empty_provider_hash_is_stored_as_null(monkeypatch):
+    _capture(monkeypatch, '[[8, "a", null, 30, 1.5, ""]]')
+    assert remote.fetch_new_payouts(_cfg(False), since_rowid=7)[0].provider_hash is None
+
+
 def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
     commands = _capture(monkeypatch)
     remote.execute_switch(_cfg(True), "gpt-oss-20b")

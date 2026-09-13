@@ -33,6 +33,8 @@ _STATE_COMMAND = (
 # Separate from _STATE_COMMAND: a slow or failed inventory read must not
 # stall or fail the daemon snapshot that freshness is judged from.
 _INVENTORY_COMMAND = f"{DARKBLOOM_BIN} models list --all --json"
+_MAX_INSTALLED_MODELS = 256
+_MAX_MODEL_ID_LENGTH = 256
 
 FAST_SWITCH_WATCHER_ASSET = Path(__file__).parent / "remote_assets" / "fast_switch_watcher.py"
 FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
@@ -118,7 +120,9 @@ def fetch_installed_models(cfg: Config) -> tuple[str, ...]:
 
 
 def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
-    """Non-empty string models[].id values, first-seen order. None = malformed."""
+    """Non-empty string models[].id values, first-seen order. None = unknown
+    (malformed item, oversize id/list, or unreadable JSON/shape). An empty
+    list is verified empty, not unknown."""
     try:
         payload = json.loads(raw)
     except ValueError:
@@ -126,15 +130,17 @@ def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
     if not isinstance(payload, dict):
         return None
     models = payload.get("models")
-    if not isinstance(models, list):
+    if not isinstance(models, list) or len(models) > _MAX_INSTALLED_MODELS:
         return None
     ids: list[str] = []
     seen: set[str] = set()
     for item in models:
         if not isinstance(item, dict):
-            continue
+            return None
         model_id = item.get("id")
-        if isinstance(model_id, str) and model_id and model_id not in seen:
+        if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
+            return None
+        if model_id not in seen:
             seen.add(model_id)
             ids.append(model_id)
     return tuple(ids)
@@ -232,7 +238,7 @@ def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
     raw = _run_ssh(cfg, remote_command, timeout=20)
     rows = json.loads(raw)
     return [Payout(rowid=r[0], model=r[1], completion_tokens=r[2] or 0, micro_usd=r[3] or 0,
-                   created_at=r[4], provider_hash=r[5]) for r in rows]
+                   created_at=r[4], provider_hash=r[5] or None) for r in rows]
 
 
 def execute_switch(cfg: Config, target_model: str) -> None:

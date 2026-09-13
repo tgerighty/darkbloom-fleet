@@ -4,15 +4,17 @@ pure logic (the lock, target-state parsing, failure backoff, the idle-gap
 wait) can be unit tested without SSH or a real darkbloom host."""
 import fcntl
 import importlib.util
+import json
 import os
+import sqlite3
 import time
 from pathlib import Path
 
 import pytest
 
 SCRIPT_PATH = Path(__file__).parent.parent / "fleet" / "remote_assets" / "fast_switch_watcher.py"
-IDLE_ON_A = {"current_model": "a", "inference_active": False}
-BUSY_ON_A = {"current_model": "a", "inference_active": True}
+IDLE_ON_A = {"current_model": "a", "inference_active": False, "trust": {"trust_level": "hardware"}}
+BUSY_ON_A = {"current_model": "a", "inference_active": True, "trust": {"trust_level": "hardware"}}
 
 
 def _load_module():
@@ -29,6 +31,7 @@ def watcher(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "FAILED_AT_FILE", tmp_path / "failed-at")
     monkeypatch.setattr(module, "TARGET_STATE_PATH", tmp_path / "state.json")
     monkeypatch.setattr(module, "LOG", tmp_path / "fast_switch.log")
+    monkeypatch.setattr(module, "WIDGET_METRICS_DB_PATH", tmp_path / "metrics.db")
     monkeypatch.setattr(module, "POLL_SECONDS", 0.01)
     return module
 
@@ -122,3 +125,45 @@ def test_verification_rides_out_a_half_written_state_file(watcher, monkeypatch):
     monkeypatch.setattr(watcher, "read_daemon_state", fake_read)
     monkeypatch.setattr(watcher.time, "sleep", lambda _seconds: None)
     assert watcher._verify("b") is True
+
+
+def test_should_switch_requires_hardware_trust(watcher):
+    idle = {"current_model": "a", "inference_active": False}
+    assert watcher._should_switch("b", idle) is False
+    idle["trust"] = {"trust_level": "self_signed"}
+    assert watcher._should_switch("b", idle) is False
+    idle["trust"] = {"trust_level": "hardware"}
+    assert watcher._should_switch("b", idle) is True
+
+
+def test_should_switch_rejects_a_matching_load_error_without_a_timestamp(watcher):
+    state = {**IDLE_ON_A, "last_model_load_error": {"model": "b", "message": "oom"}}
+    assert watcher._should_switch("b", state) is False
+    state["last_model_load_error"] = {"model": "b", "at": time.time() - 5}
+    assert watcher._should_switch("b", state) is False
+    state["last_model_load_error"] = {"model": "b", "at": time.time() - 121}
+    assert watcher._should_switch("b", state) is True
+    state["last_model_load_error"] = {"model": "c", "at": time.time() - 5}
+    assert watcher._should_switch("b", state) is True
+
+
+def _write_thermal(path: Path, thermal: str | None) -> None:
+    conn = sqlite3.connect(path)
+    conn.execute("create table samples (timestamp real, json text)")
+    payload = "{}" if thermal is None else json.dumps({"thermalState": thermal})
+    conn.execute("insert into samples values (1, ?)", (payload,))
+    conn.commit()
+    conn.close()
+
+
+def test_serious_or_critical_widget_thermal_refuses_the_start(watcher):
+    for thermal in ("serious", "critical"):
+        watcher.WIDGET_METRICS_DB_PATH.unlink(missing_ok=True)
+        _write_thermal(watcher.WIDGET_METRICS_DB_PATH, thermal)
+        assert watcher._should_switch("b", IDLE_ON_A) is False
+
+
+def test_missing_widget_thermal_does_not_block(watcher):
+    assert watcher._should_switch("b", IDLE_ON_A) is True
+    _write_thermal(watcher.WIDGET_METRICS_DB_PATH, "nominal")
+    assert watcher._should_switch("b", IDLE_ON_A) is True

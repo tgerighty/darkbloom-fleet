@@ -101,35 +101,65 @@ def decide(
     )
 
 
-def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decision:
-    """Pre-switch host gates. OBSERVE and LIVE share this path. Absent trust is
-    not treated as hardware and does not block (same as decide() today)."""
-    if result.action not in _SWITCH_ACTIONS:
-        return result
-    thermal = daemon.thermal_state
-    if thermal in _HOT_THERMAL:
-        return Decision(result.target, f"{result.reason}; blocked: thermal state is {thermal}", "BLOCKED")
-    trust = daemon.trust_level
-    if trust is not None and trust != HARDWARE_TRUST:
-        return Decision(
-            daemon.current_model,
-            f"{result.reason}; trust is {trust}, not hardware; no restart during attestation",
-            "KEEP",
-        )
+def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decision | None:
+    """BLOCKED when the target matches a load error with no valid timestamp or
+    one at most LOAD_ERROR_BLOCK_SECONDS old. None means this gate does not fire."""
     err_model = daemon.last_model_load_error_model
     err_at = daemon.last_model_load_error_at
-    if (err_model and err_at is not None and result.target == err_model
-            and abs(now - err_at) <= LOAD_ERROR_BLOCK_SECONDS):
+    if not err_model or result.target != err_model:
+        return None
+    if err_at is None:
+        return Decision(
+            result.target,
+            f"{result.reason}; blocked: {err_model} failed to load with no timestamp",
+            "BLOCKED",
+        )
+    if abs(now - err_at) <= LOAD_ERROR_BLOCK_SECONDS:
         age = abs(now - err_at)
         return Decision(
             result.target,
             f"{result.reason}; blocked: {err_model} failed to load {age:.0f}s ago",
             "BLOCKED",
         )
-    if trust is None:
+    return None
+
+
+def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decision:
+    """Thermal, trust, and load-error gates. OBSERVE and LIVE share this path.
+    Missing trust is not hardware: a switch-like decision becomes KEEP."""
+    if result.action not in _SWITCH_ACTIONS:
+        return result
+    thermal = daemon.thermal_state
+    if thermal in _HOT_THERMAL:
+        return Decision(result.target, f"{result.reason}; blocked: thermal state is {thermal}", "BLOCKED")
+    trust = daemon.trust_level
+    if trust != HARDWARE_TRUST:
+        label = "unknown" if trust is None else trust
+        return Decision(
+            daemon.current_model,
+            f"{result.reason}; trust is {label}, not hardware; no restart during attestation",
+            "KEEP",
+        )
+    blocked = _load_error_gate(result, daemon, now)
+    return blocked if blocked is not None else result
+
+
+def apply_inventory_gate(result: Decision, daemon: DaemonState) -> Decision:
+    """Unknown inventory may still be scored, but must not SWITCH. A known
+    target missing from installed ids is BLOCKED. Tick snapshot only."""
+    if result.action not in _SWITCH_ACTIONS:
+        return result
+    installed = daemon.installed_models
+    if installed is None:
+        return Decision(
+            daemon.current_model,
+            f"{result.reason}; inventory unknown: keeping the current model",
+            "KEEP",
+        )
+    if result.target is not None and result.target not in installed:
         return Decision(
             result.target,
-            f"{result.reason}; trust unknown: not treated as hardware, not blocking",
-            result.action,
+            f"{result.reason}; blocked: {result.target} is not installed",
+            "BLOCKED",
         )
     return result

@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -36,11 +38,16 @@ WIDGET_DIR = HOME / ".darkbloom-widget"
 TARGET_STATE_PATH = WIDGET_DIR / "fleet-target.json"
 DAEMON_STATE_PATH = HOME / ".darkbloom" / "daemon-state.json"
 DARKBLOOM_BIN = HOME / ".darkbloom" / "bin" / "darkbloom"
+WIDGET_METRICS_DB_PATH = WIDGET_DIR / "metrics.db"
 LOG = WIDGET_DIR / "fast_switch.log"
 LOCK_FILE = WIDGET_DIR / "fast-switch.lock"
 FAILED_AT_FILE = WIDGET_DIR / "fast-switch-failed-at"
 POLL_SECONDS = 1
 DEFAULT_MAX_SECONDS = 55
+LOAD_ERROR_BLOCK_SECONDS = 120
+HARDWARE_TRUST = "hardware"
+_HOT_THERMAL = frozenset({"serious", "critical"})
+_WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
 
 
 def acquire_lock_or_exit() -> int:
@@ -106,9 +113,66 @@ def _daemon_state_or_none() -> dict[str, object] | None:
         return None
 
 
+def _daemon_trust(state: dict[str, object]) -> str | None:
+    trust = state.get("trust")
+    if not isinstance(trust, dict):
+        return None
+    level = trust.get("trust_level")
+    return level if isinstance(level, str) and level else None
+
+
+def _finite_timestamp(value: object) -> float | None:
+    try:
+        number = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    return number if number is not None and math.isfinite(number) else None
+
+
+def _matching_load_error_is_unsafe(target: str, state: dict[str, object], now: float) -> bool:
+    raw = state.get("last_model_load_error")
+    if not isinstance(raw, dict) or raw.get("model") != target:
+        return False
+    at = _finite_timestamp(raw.get("at"))
+    if at is None:
+        return True
+    return abs(now - at) <= LOAD_ERROR_BLOCK_SECONDS
+
+
+def _widget_thermal() -> str | None:
+    """Latest widget thermalState, or None when the DB/row is missing.
+    Missing thermal degrades like fleet: it is not a block."""
+    try:
+        uri = WIDGET_METRICS_DB_PATH.expanduser().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+        try:
+            row = conn.execute(_WIDGET_LATEST_SQL).fetchone()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error, ValueError):
+        return None
+    if not row or not row[0]:
+        return None
+    try:
+        payload = json.loads(row[0])
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    thermal = payload.get("thermalState")
+    return thermal if isinstance(thermal, str) and thermal else None
+
+
 def _should_switch(target: str | None, state: dict[str, object] | None) -> bool:
-    return (target is not None and state is not None
-            and target != state.get("current_model") and not state.get("inference_active", True))
+    if target is None or state is None:
+        return False
+    if target == state.get("current_model") or state.get("inference_active", True):
+        return False
+    if _daemon_trust(state) != HARDWARE_TRUST:
+        return False
+    if _matching_load_error_is_unsafe(target, state, time.time()):
+        return False
+    return _widget_thermal() not in _HOT_THERMAL
 
 
 def _run_start(target: str) -> subprocess.CompletedProcess[str]:

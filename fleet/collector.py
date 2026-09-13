@@ -37,8 +37,8 @@ def _fetch_installed(cfg: Config) -> tuple[str, ...] | None:
 
 def _eligible_models(configured: tuple[str, ...], installed: tuple[str, ...] | None) -> frozenset[str]:
     """Configured allow-list, intersected with on-disk ids when inventory is
-    known. Unknown inventory keeps the full allow-list. Disk-only ids are
-    never enrolled."""
+    known. Unknown inventory still scores the allow-list; apply_inventory_gate
+    forbids SWITCH until inventory is known. Disk-only ids are never enrolled."""
     if installed is None:
         return frozenset(configured)
     return frozenset(configured) & frozenset(installed)
@@ -102,22 +102,29 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
     result = decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
-    return decision_mod.apply_host_gates(result, daemon, now)
+    result = decision_mod.apply_host_gates(result, daemon, now)
+    return decision_mod.apply_inventory_gate(result, daemon)
 
 
 def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: float) -> tuple[bool, str | None]:
     """Live mode only. Returns (executed, error). The restart-retry backoff is
     applied by the caller before storing the decision, so a deferred switch
-    never reaches here as a SWITCH."""
+    never reaches here as a SWITCH. Re-runs thermal/trust/load-error on a
+    fresh daemon read; inventory is not on that read and is not re-checked."""
     if decision.action != "SWITCH" or not cfg.live_execution:
         return False, None
-    fresh_daemon = _fetch_daemon(cfg, time.time())
+    fresh_now = time.time()
+    fresh_daemon = _fetch_daemon(cfg, fresh_now)
     if not fresh_daemon or not fresh_daemon.fresh or fresh_daemon.inference_active:
         return False, "aborted: provider is not confirmed fresh and idle immediately before the switch"
+    gated = decision_mod.apply_host_gates(decision, fresh_daemon, fresh_now)
+    if gated.action != "SWITCH":
+        return False, "aborted: host safety gate failed on the fresh daemon read"
     try:
         remote.execute_switch(cfg, decision.target)
     except Exception as error:  # noqa: BLE001
-        return False, str(error)
+        log.warning("switch execution failed: %s", error)
+        return False, "switch failed"
     return True, None
 
 
@@ -146,20 +153,33 @@ def _maybe_launch_fast_poll(cfg: Config, decision: Decision) -> None:
         log.warning("fast-poll watcher control failed: %s", error)
 
 
+def _persist_tick_daemon(
+    cfg: Config, pool: ConnectionPool, host: str, now: float,
+) -> tuple[DaemonState | None, tuple[str, ...] | None]:
+    """Insert the daemon row as soon as it is readable. Inventory is a second
+    SSH and must not stall that insert, or run at all when the daemon read
+    failed. Scoring uses the in-memory installed ids."""
+    daemon = _fetch_daemon(cfg, now)
+    if daemon is None:
+        return None, None
+    db.insert_daemon_snapshot(pool, host, now, daemon)
+    installed = _fetch_installed(cfg)
+    if installed is not None:
+        db.update_snapshot_installed_models(pool, host, now, installed)
+    return dataclasses.replace(daemon, installed_models=installed), installed
+
+
 def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     now = time.time()
     host = cfg.host_id
 
-    daemon = _fetch_daemon(cfg, now)
-    installed = _fetch_installed(cfg)
-    if daemon is not None:
-        daemon = dataclasses.replace(daemon, installed_models=installed)
-        db.insert_daemon_snapshot(pool, host, now, daemon)
+    daemon, installed = _persist_tick_daemon(cfg, pool, host, now)
     _probe_self_route(cfg, pool, now)
     _ingest_earnings(cfg, pool, now)
 
     current = daemon.current_model if daemon else None
     eligible = _eligible_models(cfg.models, installed)
+    db.delete_ineligible_ema(pool, host, eligible)
     if not eligible:
         # Verified empty cache, or no overlap with the allow-list: do not
         # score disk-only models and do not advance EMA freshness.

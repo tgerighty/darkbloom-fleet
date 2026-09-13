@@ -1,6 +1,6 @@
 import math
 
-from fleet.decision import apply_host_gates, decide, update_ema
+from fleet.decision import apply_host_gates, apply_inventory_gate, decide, update_ema
 from fleet.types import DaemonState, Decision, Guardrails, LOAD_ERROR_BLOCK_SECONDS
 
 GUARDRAILS = Guardrails(relative_margin=0.25, absolute_margin=0.01, switch_cost_seconds=300.0,
@@ -113,12 +113,10 @@ def test_non_hardware_trust_keeps_current_and_does_not_restart():
     assert "self_signed" in result.reason and "attestation" in result.reason
 
 
-def test_absent_trust_does_not_block_or_count_as_hardware():
+def test_absent_trust_keeps_current_and_does_not_count_as_hardware():
     result = apply_host_gates(SWITCH, _daemon(), NOW)
-    assert result.action == "SWITCH" and result.target == "b"
-    assert "trust unknown" in result.reason
-    assert "not treated as hardware" in result.reason
-    assert "not blocking" in result.reason
+    assert result.action == "KEEP" and result.target == "a"
+    assert "unknown" in result.reason and "not hardware" in result.reason
 
 
 def test_hardware_trust_leaves_a_switch_in_place():
@@ -152,10 +150,11 @@ def test_a_load_error_for_another_model_does_not_block():
     assert apply_host_gates(SWITCH, daemon, NOW) == SWITCH
 
 
-def test_a_load_error_without_at_does_not_block():
+def test_a_load_error_without_at_blocks():
     daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
                      last_model_load_error_message="oom")
-    assert apply_host_gates(SWITCH, daemon, NOW) == SWITCH
+    result = apply_host_gates(SWITCH, daemon, NOW)
+    assert result.action == "BLOCKED" and "no timestamp" in result.reason
 
 
 def test_a_slightly_future_load_error_still_blocks():
@@ -168,3 +167,23 @@ def test_a_far_future_load_error_does_not_block():
     daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
                      last_model_load_error_at=NOW + LOAD_ERROR_BLOCK_SECONDS + 1)
     assert apply_host_gates(SWITCH, daemon, NOW) == SWITCH
+
+
+def test_unknown_inventory_keeps_current_instead_of_switching():
+    result = apply_inventory_gate(SWITCH, _daemon(installed_models=None))
+    assert result.action == "KEEP" and result.target == "a"
+    assert "inventory unknown" in result.reason
+    idle = apply_inventory_gate(WHEN_IDLE, _daemon())
+    assert idle.action == "KEEP" and idle.target == "a"
+
+
+def test_a_known_target_absent_from_installed_ids_is_blocked():
+    result = apply_inventory_gate(SWITCH, _daemon(installed_models=("a",)))
+    assert result.action == "BLOCKED" and result.target == "b"
+    assert "not installed" in result.reason
+
+
+def test_a_known_installed_target_is_not_blocked_by_inventory():
+    assert apply_inventory_gate(SWITCH, _daemon(installed_models=("a", "b"))) == SWITCH
+    keep = Decision("a", "ranks first", "KEEP")
+    assert apply_inventory_gate(keep, _daemon(installed_models=None)) is keep

@@ -138,6 +138,17 @@ def insert_demand_samples(pool: ConnectionPool, host: str, observed_at: float,
         )
 
 
+def update_snapshot_installed_models(
+    pool: ConnectionPool, host: str, observed_at: float, installed: tuple[str, ...],
+) -> None:
+    """Fill installed_models on the snapshot just inserted for this tick."""
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE daemon_snapshots SET installed_models = %s WHERE host = %s AND observed_at = %s",
+            (list(installed), host, observed_at),
+        )
+
+
 def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, daemon: DaemonState) -> None:
     with pool.connection() as conn:
         conn.execute(
@@ -195,6 +206,19 @@ def load_ema(pool: ConnectionPool, host: str) -> tuple[dict[str, float], float]:
     if not rows:
         return {}, 0.0
     return {r["model"]: r["value"] for r in rows}, max(r["updated_at"] for r in rows)
+
+
+def delete_ineligible_ema(pool: ConnectionPool, host: str, eligible: frozenset[str]) -> None:
+    """Drop ema_state rows for this host that are not in eligible. Does not
+    bump updated_at on the rows that remain. An empty set deletes every row."""
+    with pool.connection() as conn:
+        if eligible:
+            conn.execute(
+                "DELETE FROM ema_state WHERE host = %s AND NOT (model = ANY(%s))",
+                (host, list(eligible)),
+            )
+        else:
+            conn.execute("DELETE FROM ema_state WHERE host = %s", (host,))
 
 
 def save_ema(pool: ConnectionPool, host: str, ema: dict[str, float], updated_at: float) -> None:
