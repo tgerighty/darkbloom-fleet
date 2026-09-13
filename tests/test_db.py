@@ -49,6 +49,7 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     assert pool.calls[0][1][-1].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
                                          "mtp_active": False, "mtp_inactive_reason": "idle"}]
     assert pool.calls[0][1][20:23] == (None, None, None)
+    assert pool.calls[0][1][23] is None
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None)
     assert pool.calls[2][1] == ("live", True, None, 9)
 
@@ -65,6 +66,22 @@ def test_daemon_snapshots_persist_last_model_load_error(fake_pool):
     assert row[20:23] == ("n", "oom", 99.0)
     assert "last_model_load_error_model" in db.SCHEMA_SQL
     assert "last_model_load_error_at" in db.SCHEMA_SQL
+
+
+def test_daemon_snapshots_persist_nullable_installed_models(fake_pool):
+    known = fake_pool()
+    db.insert_daemon_snapshot(
+        known, "h", 1.0, DaemonState("m", ("m",), False, 1, 0.5, True, installed_models=("a", "b")))
+    empty = fake_pool()
+    db.insert_daemon_snapshot(
+        empty, "h", 1.0, DaemonState("m", ("m",), False, 1, 0.5, True, installed_models=()))
+    unknown = fake_pool()
+    db.insert_daemon_snapshot(unknown, "h", 1.0, DaemonState("m", ("m",), False, 1, 0.5, True))
+    assert known.calls[0][1][23] == ["a", "b"]
+    assert empty.calls[0][1][23] == []
+    assert unknown.calls[0][1][23] is None
+    assert "installed_models TEXT[]" in db.SCHEMA_SQL
+    assert "installed_models TEXT[] NOT NULL" not in db.SCHEMA_SQL
 
 
 def test_self_route_samples_record_an_empty_probe_too(fake_pool):

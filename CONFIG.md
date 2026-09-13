@@ -178,11 +178,18 @@ separate setting - one less knob, and it stays correct if the cadence
 changes. In OBSERVE mode this is also a no-op: the collector only logs what
 it would launch.
 
+## Local model inventory
+
+Each tick runs a read-only `~/.darkbloom/bin/darkbloom models list --all --json`
+over SSH, separate from the daemon-state command. Presence of `models[].id`
+means that model is on disk. Scoring uses the intersection of that list and
+`DARKBLOOM_HOST_<N>_MODELS`; disk-only ids are never enrolled. A failed or
+malformed read logs a warning and falls back to the configured allow-list
+for that tick. A verified empty list scores nothing and records WAIT without
+advancing EMA freshness. The snapshot stores the ids as NULL (unknown) or
+an array (including empty). Inventory is observation only: no download,
+remove, or warmup.
+
 ## What's deferred, and why it's safe to defer for v1
 
-- **Local model-availability discovery** (`darkbloom models list --all` over
-  SSH): the source project uses this to auto-exclude models that aren't
-  downloaded on the host. Each host instead scores a fixed configured list
-  (`DARKBLOOM_HOST_<N>_MODELS`) - correct as long as that list matches what's
-  actually downloaded on that Mac, which the operator verifies at setup.
 - **LLM-driven decisions**: out of scope; decisions use the scored formula.

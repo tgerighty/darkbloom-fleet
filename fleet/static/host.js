@@ -41,6 +41,10 @@ function esc(v) {
 }
 function mins(v) { return v === null || v === undefined ? "not yet" : v + " min"; }
 function yes(v) { return v ? "yes" : "–"; }
+function tri(v) {
+  if (v === null || v === undefined) return "unknown";
+  return v ? "yes" : "–";
+}
 export { esc };
 
 export function actionLabel(decision, mode) {
@@ -194,9 +198,9 @@ function switchCost(c) {
 function trustSection(r) {
   const models = r.models || [];
   const modelRows = models.length ? models.map(function (m) {
-    return TR + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + m.routable_providers + TD +
-      fmtAge(m.last_served_at) + TR_END;
-  }).join("") : "<tr><td colspan=5><i>no probe data yet</i></td></tr>";
+    return TR + esc(m.model) + TD + yes(m.advertised) + TD + yes(m.warm) + TD + tri(m.installed) + TD +
+      m.routable_providers + TD + fmtAge(m.last_served_at) + TR_END;
+  }).join("") : "<tr><td colspan=6><i>no probe data yet</i></td></tr>";
   const session = r.session
     ? "daemon restarted " + fmtAge(r.session.started_at) + " · first request after " +
       mins(r.session.first_request_after_min) + " · any host routable after " +
@@ -208,8 +212,9 @@ function trustSection(r) {
   return '<details class="fold" data-fold="trust"><summary>🛡 Trust &amp; attestation</summary>' +
     '<div class="sub">' + trust + switchCost(r.switch_cost) + "<br>" + esc(session) + "<br>" +
     esc(probeNote) + DIV_END +
-    "<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>routable providers</th>" +
-    "<th>last served</th></tr></thead><tbody>" + modelRows + "</tbody></table></details>";
+    "<table><thead><tr><th>model</th><th>advertised</th><th>warm</th><th>installed</th>" +
+    "<th>routable providers</th><th>last served</th></tr></thead><tbody>" + modelRows +
+    "</tbody></table></details>";
 }
 
 function decisionsSection(decisions, mode) {

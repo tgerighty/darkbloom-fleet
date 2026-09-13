@@ -4,6 +4,7 @@ that part only, matching the source project's per-source resilience.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 
@@ -23,6 +24,24 @@ def _fetch_daemon(cfg: Config, now: float) -> DaemonState | None:
     except Exception as error:  # noqa: BLE001 - one bad tick must not kill the loop
         log.warning("daemon state unavailable: %s", error)
         return None
+
+
+def _fetch_installed(cfg: Config) -> tuple[str, ...] | None:
+    """Verified on-disk ids, or None when inventory is unknown this tick."""
+    try:
+        return remote.fetch_installed_models(cfg)
+    except Exception as error:  # noqa: BLE001 - must not stall or fail daemon state
+        log.warning("installed-model inventory unknown: %s", error)
+        return None
+
+
+def _eligible_models(configured: tuple[str, ...], installed: tuple[str, ...] | None) -> frozenset[str]:
+    """Configured allow-list, intersected with on-disk ids when inventory is
+    known. Unknown inventory keeps the full allow-list. Disk-only ids are
+    never enrolled."""
+    if installed is None:
+        return frozenset(configured)
+    return frozenset(configured) & frozenset(installed)
 
 
 def _fetch_scores(cfg: Config) -> tuple[dict[str, CapacitySample], dict[str, float]]:
@@ -132,25 +151,35 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     host = cfg.host_id
 
     daemon = _fetch_daemon(cfg, now)
+    installed = _fetch_installed(cfg)
     if daemon is not None:
+        daemon = dataclasses.replace(daemon, installed_models=installed)
         db.insert_daemon_snapshot(pool, host, now, daemon)
     _probe_self_route(cfg, pool, now)
     _ingest_earnings(cfg, pool, now)
 
+    current = daemon.current_model if daemon else None
+    eligible = _eligible_models(cfg.models, installed)
+    if not eligible:
+        # Verified empty cache, or no overlap with the allow-list: do not
+        # score disk-only models and do not advance EMA freshness.
+        _record_and_act(cfg, pool, Decision(None, "no eligible installed models", "WAIT"), current, now)
+        return
+
     samples, prices = _fetch_scores(cfg)
+    samples = {model: sample for model, sample in samples.items() if model in eligible}
     scores = scoring.compute_scores(samples, prices, cfg.weights)
     if not scores:
         # No scored models this tick: leave the stored EMA and its timestamp
         # untouched (saving now would fake a fresh dt on the next real update)
         # and wait rather than score stale data.
-        result = Decision(None, "demand feeds unavailable", "WAIT")
-        _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
+        _record_and_act(cfg, pool, Decision(None, "demand feeds unavailable", "WAIT"), current, now)
         return
 
     ema_prev, last_updated = db.load_ema(pool, host)
-    # A model removed from DARKBLOOM_HOST_<N>_MODELS must not survive in the
-    # restored EMA — its stale score could still win a decision.
-    ema_prev = {model: value for model, value in ema_prev.items() if model in cfg.models}
+    # A model removed from DARKBLOOM_HOST_<N>_MODELS or missing from disk
+    # must not survive in the restored EMA — its stale score could still win.
+    ema_prev = {model: value for model, value in ema_prev.items() if model in eligible}
     dt = max(1.0, now - last_updated) if last_updated else cfg.poll_interval_seconds
     ema = decision_mod.update_ema(ema_prev, scores, dt, cfg.ema_tau_minutes)
     if ema:
@@ -158,7 +187,7 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     db.insert_demand_samples(pool, host, now, samples, scores, prices, ema)
 
     result = _decide(cfg, pool, ema, daemon, now)
-    _record_and_act(cfg, pool, result, daemon.current_model if daemon else None, now)
+    _record_and_act(cfg, pool, result, current, now)
 
 
 def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current_model: str | None, now: float) -> None:

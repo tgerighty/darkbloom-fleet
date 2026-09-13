@@ -166,6 +166,7 @@ def test_live_switch_uses_the_watcher_binary_path_and_quotes_the_model(monkeypat
     remote.execute_switch(_cfg(True), "gpt oss; rm")
     assert Path(remote.DARKBLOOM_BIN).expanduser() == Path.home() / ".darkbloom" / "bin" / "darkbloom"
     assert commands == [f"{remote.DARKBLOOM_BIN} start --model 'gpt oss; rm' --idle-timeout 0"]
+    assert "models list" not in remote._STATE_COMMAND
 
 
 def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):
@@ -182,6 +183,23 @@ def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monk
     moves = [i for i, line in enumerate(lines) if line.startswith("mv -f ")]
     assert lines[0] == "set -e"
     assert len(moves) == 2 and max(moves) < launch
+
+
+def test_inventory_fetch_is_a_separate_all_json_list_command(monkeypatch):
+    commands = _capture(
+        monkeypatch,
+        '{"cacheDirectory": "/x", "filteredByConfig": false, "models": [{"id": "a"}, {"id": "a"}]}',
+    )
+    assert remote.fetch_installed_models(_cfg(False)) == ("a",)
+    assert commands == [remote._INVENTORY_COMMAND]
+    assert remote._INVENTORY_COMMAND == f"{remote.DARKBLOOM_BIN} models list --all --json"
+    assert "models list" not in remote._STATE_COMMAND
+
+
+def test_inventory_fetch_rejects_malformed_json(monkeypatch):
+    _capture(monkeypatch, "not json")
+    with pytest.raises(RuntimeError, match="malformed"):
+        remote.fetch_installed_models(_cfg(False))
 
 
 def test_non_finite_widget_values_are_dropped():

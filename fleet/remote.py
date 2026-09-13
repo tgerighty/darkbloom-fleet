@@ -30,6 +30,9 @@ _STATE_COMMAND = (
     f"cat {DAEMON_STATE_PATH} && printf '\\n{_DOC_SEPARATOR}\\n' && "
     f"(sqlite3 {WIDGET_METRICS_DB_PATH} '{_WIDGET_LATEST_SQL}' || true)"
 )
+# Separate from _STATE_COMMAND: a slow or failed inventory read must not
+# stall or fail the daemon snapshot that freshness is judged from.
+_INVENTORY_COMMAND = f"{DARKBLOOM_BIN} models list --all --json"
 
 FAST_SWITCH_WATCHER_ASSET = Path(__file__).parent / "remote_assets" / "fast_switch_watcher.py"
 FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
@@ -101,6 +104,40 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         last_model_load_error_message=load_error[1],
         last_model_load_error_at=load_error[2],
     )
+
+
+def fetch_installed_models(cfg: Config) -> tuple[str, ...]:
+    """Read-only local-cache ids. Observation only — not gated by live
+    execution. Raises on SSH failure or malformed JSON/shape; an empty
+    tuple is a verified empty cache. Presence of an id means on disk."""
+    raw = _run_ssh(cfg, _INVENTORY_COMMAND, timeout=20)
+    ids = _parse_installed_model_ids(raw)
+    if ids is None:
+        raise RuntimeError("installed-model inventory is malformed")
+    return ids
+
+
+def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
+    """Non-empty string models[].id values, first-seen order. None = malformed."""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return None
+    ids: list[str] = []
+    seen: set[str] = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id")
+        if isinstance(model_id, str) and model_id and model_id not in seen:
+            seen.add(model_id)
+            ids.append(model_id)
+    return tuple(ids)
 
 
 def _split_documents(raw: str) -> tuple[str, str]:

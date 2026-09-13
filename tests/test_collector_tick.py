@@ -162,6 +162,7 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
         return lambda *args, **kwargs: calls.append(name)
 
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: None)
     monkeypatch.setattr(collector.db, "insert_daemon_snapshot", record("snapshot"))
     monkeypatch.setattr(collector, "_probe_self_route", record("probe"))
     monkeypatch.setattr(collector, "_fetch_scores", lambda cfg: ({"a": CapacitySample("a", 2, 1, 2.0)}, {"a": 0.1}))
@@ -183,6 +184,7 @@ def test_run_tick_keys_rows_by_host_id_and_drops_retired_models_from_the_restore
         return {"a": 0.1, "gone": 9.0}, 50.0
 
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: None)
     monkeypatch.setattr(collector.db, "insert_daemon_snapshot", lambda *args: None)
     monkeypatch.setattr(collector, "_probe_self_route", lambda *args: None)
     monkeypatch.setattr(collector, "_ingest_earnings", lambda *args: None)
@@ -204,6 +206,7 @@ def test_run_tick_waits_and_leaves_the_ema_untouched_when_no_model_is_scored(mon
         return lambda *args, **kwargs: calls.append(name)
 
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: None)
     monkeypatch.setattr(collector.db, "insert_daemon_snapshot", record("snapshot"))
     monkeypatch.setattr(collector, "_probe_self_route", record("probe"))
     monkeypatch.setattr(collector, "_fetch_scores", lambda cfg: ({}, {}))

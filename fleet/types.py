@@ -53,6 +53,9 @@ class DaemonState:
     last_model_load_error_model: str | None = None
     last_model_load_error_message: str | None = None
     last_model_load_error_at: float | None = None  # absolute unix timestamp
+    # Local-cache ids from `darkbloom models list --all --json`. None = unknown
+    # this tick; () = verified empty. Presence of an id means on disk.
+    installed_models: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

@@ -112,6 +112,30 @@ describe("no placeholder chrome", function () {
     expect(bandHtml(host(), host().card)).not.toContain("load error");
   });
 
+  it("shows installed status in the trust table and escapes model ids", function () {
+    const html = renderHost(host({
+      routability: {
+        trust_level: "hardware",
+        models: [
+          { model: "<img src=x>", advertised: true, warm: false, routable_providers: 0,
+            last_served_at: null, installed: true },
+          { model: "gemma", advertised: false, warm: true, routable_providers: 1,
+            last_served_at: null, installed: false },
+          { model: "llama", advertised: false, warm: false, routable_providers: 0,
+            last_served_at: null, installed: null },
+        ],
+      },
+    }), "24h", "");
+    expect(html).toContain("<th>installed</th>");
+    expect(html).toContain("&lt;img src=x&gt;");
+    expect(html).not.toContain("<img src=x>");
+    expect(html).toContain("trust: hardware");
+    expect(html).toMatch(/<td>yes<\/td><td>–<\/td><td>yes<\/td>/); // advertised, not warm, installed
+    expect(html).toMatch(/<td>–<\/td><td>–<\/td><td>unknown<\/td>/); // installed unknown
+    expect(html).not.toContain('class="chips"><span class="glabel">installed');
+    expect(html).not.toContain("catalog");
+  });
+
   it("shows an old load error without the fault class", function () {
     const html = bandHtml(host(), { ...host().card, last_model_load_error: {
       model: "gemma", message: "oom", at: 1, recent: false,

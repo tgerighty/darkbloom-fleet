@@ -60,6 +60,8 @@ ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS slots JSONB;
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_model TEXT;
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_message TEXT;
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_at DOUBLE PRECISION;
+-- Nullable: NULL = inventory unknown this tick; '{}' = verified empty cache.
+ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS installed_models TEXT[];
 
 -- One row per model the coordinator will route to on our machines, per probe.
 -- A probe that found nothing routable writes one row with model = '' so the
@@ -143,8 +145,9 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
             "inference_active, fresh, pid, started_at, advertised_models, requests_served, "
             "trust_level, trust_reason, thermal_state, memory_pressure, cpu_usage, fan_rpm, "
             "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, "
-            "last_model_load_error_model, last_model_load_error_message, last_model_load_error_at, slots) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "last_model_load_error_model, last_model_load_error_message, last_model_load_error_at, "
+            "installed_models, slots) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
              daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
              list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason,
@@ -152,6 +155,7 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
              daemon.peak_temperature_c, daemon.gpu_active_gb, daemon.gpu_cache_gb, daemon.total_memory_gb,
              daemon.last_model_load_error_model, daemon.last_model_load_error_message,
              daemon.last_model_load_error_at,
+             None if daemon.installed_models is None else list(daemon.installed_models),
              Jsonb([dataclasses.asdict(s) for s in daemon.slots])),
         )
 

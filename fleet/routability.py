@@ -130,7 +130,10 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switc
     snapshot = daemon or {}
     advertised = set(snapshot.get("advertised_models") or [])
     warm = set(snapshot.get("warm_models") or [])
-    counts = _aliased_counts(counts, advertised | warm)
+    raw_installed = snapshot.get("installed_models")
+    known_installed = None if raw_installed is None else set(raw_installed)
+    on_disk = set(known_installed or ())
+    counts = _aliased_counts(counts, advertised | warm | on_disk)
     started_at = float(snapshot.get("started_at") or 0)
     median, n = _switch_cost_sessions(pool, host)
     measured = _usable_measured_cost(median, n)
@@ -144,8 +147,9 @@ def routability_panel(pool: ConnectionPool, host: str, daemon: Row | None, switc
         "last_served_at": max(served.values()) if served else None,
         "models": [
             {"model": m, "advertised": m in advertised, "warm": m in warm,
-             "routable_providers": counts.get(m, 0), "last_served_at": served.get(m)}
-            for m in sorted(advertised | warm | set(counts) | set(served))
+             "routable_providers": counts.get(m, 0), "last_served_at": served.get(m),
+             "installed": None if known_installed is None else m in known_installed}
+            for m in sorted(advertised | warm | set(counts) | set(served) | on_disk)
         ],
         "session": session_timing(pool, host, started_at) if started_at else None,
         "switch_cost": {"configured_seconds": switch_cost_seconds,
