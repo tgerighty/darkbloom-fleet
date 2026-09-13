@@ -1,7 +1,5 @@
 // Terminal-style "Jobs · hourly buckets" panel: one row per hour (newest
 // first), with one character per 90-second portion of the hour.
-import { esc } from "./dashboard.js";
-
 const BAR_WIDTH = 40;
 const TIME_W = 16;
 const JOBS_W = 4;
@@ -12,6 +10,10 @@ const COL_GAP = "    ";
 const NL = "\n";
 const FOLD = '<details class="fold" open><summary>Jobs · hourly buckets · 24 h</summary>';
 const EMPTY = { legend: [], rows: [] };
+
+function esc(value) {
+  return String(value).replaceAll(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[char]));
+}
 
 function span(slot, text) {
   return '<span class="m' + (slot % SLOTS) + '">' + text + "</span>";
