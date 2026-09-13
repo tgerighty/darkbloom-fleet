@@ -122,15 +122,19 @@ def _thrash(pool: ConnectionPool, host_id: str, now: float) -> Row | None:
 
 
 def _warm_flips(rows: list[Row]) -> tuple[int, float | None]:
+    """(warm-set changes in the hour, when the count first passed WARM_FLIPS)
+    — the first crossing, not the last, so THRASH keeps its origin time."""
     prev: frozenset[str] | None = None
     flips = 0
     since: float | None = None
     for row in rows:
         warm = frozenset(row.get("warm_models") or ())
-        if prev is not None and warm != prev:
-            flips += 1
-            if flips > WARM_FLIPS and since is None:
-                since = float(row["observed_at"])
+        if prev is None or warm == prev:
+            prev = warm
+            continue
+        flips += 1
+        if since is None and flips > WARM_FLIPS:
+            since = float(row["observed_at"])
         prev = warm
     return flips, since
 
