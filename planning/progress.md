@@ -1,5 +1,12 @@
 # Progress
 
+- [NOW] [FEATURE] "Jobs · hourly buckets" panel per host card (PR #6):
+  last-24 h attributed payout counts bucketed by hour with a letter legend
+  and range share (`hourly_jobs` in /api/status, fleet/hourly.py), the
+  40-char distribution bar and percentages rendered client-side from the
+  row counts (fleet/static/hourly.js); also fixes the self-referential
+  SPAN_END/SPAN_DIV_END constants 774217a left in dashboard.js (TDZ crash
+  on page load)
 - [NOW] [FEATURE] [IN-PROGRESS] Console-style per-host cards matching the
   darkbloom.dev "Your fleet" page: widget metrics + daemon capacity/slots
   ingested in the daemon-state SSH round trip (new daemon_snapshots columns),

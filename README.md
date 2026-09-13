@@ -46,7 +46,9 @@ happened and why.
 - **Its own dashboard.** A real web UI the service serves itself, not a
   page that needs anyone to keep it updated by hand. Each host renders as a
   console-style card (status band, resource gauges, GPU memory bar,
-  loaded/catalog chips, KPI tiles, backend slots, trust & attestation)
+  loaded/catalog chips, KPI tiles, a "Jobs · hourly buckets" terminal panel
+  — one row per hour with a 40-letter per-model distribution bar over the
+  last 24 h — backend slots, trust & attestation)
   mirroring the darkbloom.dev "Your fleet" page.
 - **Executes switches autonomously**, gated by configurable guardrails
   (idle-before-switch, EMA-smoothed confirmation, restart-retry backoff)

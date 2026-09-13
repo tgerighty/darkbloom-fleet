@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 from .attribution import provider_hosts, unattributed_recent
 from .card import build_card
 from .config import Config
+from .hourly import hourly_jobs
 from .routability import routability_panel
 
 DAY_SECONDS = 86_400
@@ -147,4 +148,5 @@ def build_status(cfg: Config, pool: ConnectionPool) -> Row:
         "unattributed_recent": unattributed_recent(pool, host, attributed),
         "routability": routability,
         "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now),
+        "hourly_jobs": hourly_jobs(pool, host, hashes, now),
     }

@@ -61,24 +61,27 @@ def test_lifetime_serving_starts_at_the_first_snapshot(fake_pool, monkeypatch):
     assert queries.serving_percentage(fake_pool([{"t": None}]), "h", None) == {}
 
 
-def _status_responses(daemon, demand, decisions, votes=(), card_totals=None):
+def _status_responses(daemon, demand, decisions, votes=(), card_totals=None, hourly=None):
     """Canned rows in the order build_status queries them: daemon, demand,
     attribution votes, the routability panel (self-route probe, last-served,
     measured switch cost), earnings x2, four fixed windows (before + rows
     each), lifetime's first snapshot, decisions, earnings rows, unattributed
-    recent hashes, the card's session payout totals."""
+    recent hashes, the card's session payout totals, the hourly jobs buckets."""
     return [daemon, demand, list(votes), [{"t": None}], [], [{"median": None, "n": 0}],
             [{"total": 2_500_000}], [{"total": 500_000}], *([[], []] * 4), [{"t": None}], decisions,
             [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}],
             [{"provider_hash": None}, {"provider_hash": "no-votes"}],
-            card_totals or [{"tokens": 4_000, "requests": 2}]]
+            card_totals or [{"tokens": 4_000, "requests": 2}],
+            hourly or []]
 
 
 def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_990.0}
     votes = [{"provider_hash": "s1", "host": "m3", "votes": 2}, {"provider_hash": "s2", "host": "other", "votes": 9}]
-    pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}], [{"action": "KEEP"}], votes))
+    hourly = [{"hour": 9_000.0, "model": "a", "n": 2}]
+    pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}], [{"action": "KEEP"}], votes,
+                                        hourly=hourly))
     status = queries.build_status(
         SimpleNamespace(host_label="M3 label", host_id="m3", host_spec="M3 Max", live_execution=False,
                         switch_cost_seconds=300.0), pool)
@@ -88,6 +91,8 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert status["recent_decisions"] == [{"action": "KEEP"}]
+    assert status["hourly_jobs"] == {"legend": [{"letter": "A", "model": "a"}], "range_share": {"a": 100},
+                                     "rows": [{"hour": 9_000, "jobs": 2, "counts": {"a": 2}}]}
     assert status["recent_earnings"] == [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}]
     assert status["unattributed_recent"] == 2
     assert status["card"]["status"]["state"] == "ATTESTING"  # no trust level on the snapshot

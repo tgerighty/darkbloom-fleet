@@ -81,6 +81,21 @@
   details.fold { margin: 0.7rem 0; }
   .card > details.fold { margin: 0; padding: 0 1rem 0.8rem; }
   details.fold summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.4rem; }
+
+  /* Jobs · hourly buckets: terminal-style monospace panel. The eight model
+     colours are a categorical set validated for CVD separation and contrast
+     on the panel surface in both modes (dataviz palette checks). */
+  pre.hourly { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; margin: 0;
+               padding: 0.55rem 0.75rem; border-radius: 6px; overflow-x: auto;
+               background: light-dark(#fafafc, #141519); }
+  pre.hourly .m0 { color: light-dark(#2b6cb0, #4a90d9); }
+  pre.hourly .m1 { color: light-dark(#b4552e, #c07a45); }
+  pre.hourly .m2 { color: light-dark(#0a8f80, #2aa398); }
+  pre.hourly .m3 { color: light-dark(#8a5a00, #b58a2f); }
+  pre.hourly .m4 { color: light-dark(#c2547c, #d06f92); }
+  pre.hourly .m5 { color: light-dark(#1c7c4a, #349267); }
+  pre.hourly .m6 { color: light-dark(#5551b0, #8d86dd); }
+  pre.hourly .m7 { color: light-dark(#c0392b, #d6604f); }
   .slot-row { display: flex; align-items: baseline; gap: 0.8rem; padding: 0.22rem 0;
               border-bottom: 1px solid light-dark(#0001, #fff1); }
   .slot-row:last-child { border-bottom: none; }

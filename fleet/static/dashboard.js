@@ -1,8 +1,10 @@
+import { hourlySection } from "./hourly.js";
+
 const TD = "</td><td>";
 const TR = "<tr><td>";
 const TR_END = "</td></tr>";
-const SPAN_END = SPAN_END;
-const SPAN_DIV_END = SPAN_DIV_END;
+const SPAN_END = "</span>";
+const SPAN_DIV_END = "</span></div>";
 const DIV_END = "</div>";
 const FOLD_END = "</details>";
 const WINDOWS = ["1h", "7h", "24h", "30d", "lifetime"];
@@ -40,6 +42,7 @@ function clock(epoch) {
 function num(v, digits) { return v === null || v === undefined ? "–" : Number(v).toFixed(digits); }
 function pct01(v) { return v === null || v === undefined ? "–" : Math.round(100 * v) + "%"; }
 function esc(v) { return v === null || v === undefined ? "" : String(v).replaceAll(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+export { esc };
 function mins(v) { return v === null || v === undefined ? "not yet" : v + " min"; }
 function yes(v) { return v ? "yes" : "–"; }
 
@@ -214,6 +217,7 @@ function renderHost(s, index) {
     '<div class="idle-note"><span class="glabel">memory when idle</span>Always ready — models stay loaded</div>' +
     kpiGrid(s, card) +
     servingSection(s, index) +
+    hourlySection(s) +
     slotsSection(s, card) +
     trustSection(s.routability || EMPTY_ROUT) +
     DIV_END +
