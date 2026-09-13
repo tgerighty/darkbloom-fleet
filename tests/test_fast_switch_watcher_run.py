@@ -59,6 +59,26 @@ def test_inventory_list_uses_the_local_darkbloom_bin(watcher, monkeypatch):
     assert seen["args"][:4] == [str(watcher.DARKBLOOM_BIN), "models", "list", "--all"]
 
 
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired("darkbloom", 20), FileNotFoundError("darkbloom")])
+def test_inventory_list_timeout_or_missing_cli_is_unknown(watcher, monkeypatch, error):
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", watcher._real_fetch_installed_ids)
+
+    def fake_run(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(watcher.subprocess, "run", fake_run)
+    assert watcher._inventory_allows("b") is False
+
+
+def test_inventory_list_nonzero_exit_is_unknown(watcher, monkeypatch):
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", watcher._real_fetch_installed_ids)
+    monkeypatch.setattr(
+        watcher.subprocess, "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 1, stdout="", stderr="fail"),
+    )
+    assert watcher._inventory_allows("b") is False
+
+
 def test_daemon_state_comes_from_the_state_file(watcher):
     watcher.DAEMON_STATE_PATH.write_text('{"current_model": "a"}')
     assert watcher.read_daemon_state() == {"current_model": "a"}

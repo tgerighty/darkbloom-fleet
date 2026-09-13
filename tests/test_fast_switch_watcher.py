@@ -144,6 +144,11 @@ def test_should_switch_requires_hardware_trust(watcher):
     assert watcher._should_switch("b", idle) is True
 
 
+def test_should_switch_is_false_without_a_target_or_daemon_state(watcher):
+    assert watcher._should_switch(None, IDLE_ON_A) is False
+    assert watcher._should_switch("b", None) is False
+
+
 def test_should_switch_rejects_a_matching_load_error_without_a_timestamp(watcher):
     state = {**IDLE_ON_A, "last_model_load_error": {"model": "b", "message": "oom"}}
     assert watcher._should_switch("b", state) is False
@@ -179,6 +184,24 @@ def test_missing_widget_thermal_does_not_block(watcher):
     assert watcher._should_switch("b", IDLE_ON_A) is True
 
 
+def _write_sample_json(path: Path, raw: str | None, *, empty: bool = False) -> None:
+    path.unlink(missing_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("create table samples (timestamp real, json text)")
+    if not empty:
+        conn.execute("insert into samples values (1, ?)", (raw,))
+    conn.commit()
+    conn.close()
+
+
+def test_empty_or_malformed_widget_thermal_does_not_block(watcher):
+    _write_sample_json(watcher.WIDGET_METRICS_DB_PATH, None, empty=True)
+    assert watcher._should_switch("b", IDLE_ON_A) is True
+    for raw in (None, "", "not json", "[1]"):
+        _write_sample_json(watcher.WIDGET_METRICS_DB_PATH, raw)
+        assert watcher._should_switch("b", IDLE_ON_A) is True
+
+
 def test_should_switch_refuses_stale_missing_invalid_and_accepts_fresh_written_at(watcher):
     now = time.time()
     watcher.TARGET_STATE_PATH.write_text(json.dumps({"daemon_freshness_seconds": 90.0}))
@@ -196,6 +219,13 @@ def test_should_switch_refuses_stale_missing_invalid_and_accepts_fresh_written_a
     assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": now}) is False
 
 
+def test_should_switch_refuses_when_freshness_state_is_unreadable(watcher):
+    watcher.TARGET_STATE_PATH.write_text("not json")
+    assert watcher._should_switch("b", IDLE_ON_A) is False
+    watcher.TARGET_STATE_PATH.unlink()
+    assert watcher._should_switch("b", IDLE_ON_A) is False
+
+
 def test_wait_does_not_consult_inventory(watcher, monkeypatch):
     watcher.TARGET_STATE_PATH.write_text(json.dumps({
         "target": "b", "valid_targets": ["a", "b"], "daemon_freshness_seconds": 1_000_000.0,
@@ -211,6 +241,10 @@ def test_parse_installed_model_ids_is_the_bounded_stdlib_schema(watcher):
     assert watcher._parse_installed_model_ids('{"models": [{"id": "a"}, {"id": "b"}]}') == ("a", "b")
     assert watcher._parse_installed_model_ids('{"models": []}') == ()
     assert watcher._parse_installed_model_ids("not json") is None
+    assert watcher._parse_installed_model_ids("[]") is None
+    assert watcher._parse_installed_model_ids('{"models": {}}') is None
     assert watcher._parse_installed_model_ids('{"models": [{"id": "a"}, "skip"]}') is None
     too_long = "m" * (watcher._MAX_MODEL_ID_LENGTH + 1)
     assert watcher._parse_installed_model_ids('{"models": [{"id": "' + too_long + '"}]}') is None
+    too_many = [{"id": f"m{i}"} for i in range(watcher._MAX_INSTALLED_MODELS + 1)]
+    assert watcher._parse_installed_model_ids(json.dumps({"models": too_many})) is None

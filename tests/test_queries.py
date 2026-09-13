@@ -125,6 +125,12 @@ def test_serving_percentages_lifetime_idle_when_the_aggregate_has_no_model_secon
     assert result["lifetime"] == {"idle": 100.0}
 
 
+def test_serving_percentages_lifetime_empty_when_the_aggregate_has_no_since(fake_pool):
+    # Empty snaps: MIN(observed_at) is NULL, LEFT JOIN still yields one bounds row.
+    pool = fake_pool([], [{"since": None, "model": None, "seconds": None}])
+    assert queries.serving_percentages(pool, "h", 1200.0)["lifetime"] == {}
+
+
 def _status_responses(daemon, demand, decisions, card_totals=None, hourly=None):
     """Canned rows in the order build_status queries them: daemon, demand,
     last-served, measured switch cost, earnings x2, bounded serving plus lifetime,

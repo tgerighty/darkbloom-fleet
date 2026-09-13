@@ -108,3 +108,20 @@ def test_an_aged_fresh_snapshot_is_stale(fake_pool):
     current = _card(fake_pool([{"tokens": 0, "requests": 0}]),
                     _daemon(fresh=True, observed_at=1_000.0, inference_active=True), now=1_000.0 + FRESHNESS)
     assert current["status"]["state"] == "EARNING"
+
+
+def test_a_non_numeric_observed_at_does_not_mark_a_fresh_snapshot_stale(fake_pool):
+    for observed_at in ("not-a-time", ["bad"]):
+        built = _card(fake_pool([{"tokens": 0, "requests": 0}]),
+                      _daemon(fresh=True, observed_at=observed_at, inference_active=True))
+        assert built["status"]["state"] == "EARNING"
+
+
+def test_a_non_numeric_load_error_at_is_not_recent(fake_pool):
+    for at in ("nope", ["bad"]):
+        built = _card(fake_pool([{"tokens": 0, "requests": 0}]),
+                      _daemon(last_model_load_error_model="b", last_model_load_error_message="oom",
+                              last_model_load_error_at=at))
+        assert built["last_model_load_error"] == {
+            "model": "b", "message": "oom", "at": at, "recent": False,
+        }
