@@ -48,6 +48,8 @@ LOAD_ERROR_BLOCK_SECONDS = 120
 HARDWARE_TRUST = "hardware"
 _HOT_THERMAL = frozenset({"serious", "critical"})
 _WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
+_MAX_INSTALLED_MODELS = 256
+_MAX_MODEL_ID_LENGTH = 256
 
 
 def acquire_lock_or_exit() -> int:
@@ -134,9 +136,66 @@ def _matching_load_error_is_unsafe(target: str, state: dict[str, object], now: f
     if not isinstance(raw, dict) or raw.get("model") != target:
         return False
     at = _finite_timestamp(raw.get("at"))
-    if at is None:
+    if at is None or at > now:
         return True
-    return abs(now - at) <= LOAD_ERROR_BLOCK_SECONDS
+    return (now - at) <= LOAD_ERROR_BLOCK_SECONDS
+
+
+def _freshness_limit_seconds() -> float | None:
+    try:
+        state = json.loads(TARGET_STATE_PATH.read_text())
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+    return _finite_timestamp(state.get("daemon_freshness_seconds"))
+
+
+def _daemon_is_fresh(state: dict[str, object], now: float) -> bool:
+    written_at = _finite_timestamp(state.get("written_at"))
+    limit = _freshness_limit_seconds()
+    if written_at is None or limit is None or written_at <= 0 or limit < 0:
+        return False
+    return abs(now - written_at) <= limit
+
+
+def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
+    """Same bounded schema as fleet.remote: models[].id strings, first-seen."""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    models = payload.get("models")
+    if not isinstance(models, list) or len(models) > _MAX_INSTALLED_MODELS:
+        return None
+    ids: list[str] = []
+    seen: set[str] = set()
+    for item in models:
+        if not isinstance(item, dict):
+            return None
+        model_id = item.get("id")
+        if not isinstance(model_id, str) or not model_id or len(model_id) > _MAX_MODEL_ID_LENGTH:
+            return None
+        if model_id not in seen:
+            seen.add(model_id)
+            ids.append(model_id)
+    return tuple(ids)
+
+
+def _fetch_installed_ids() -> tuple[str, ...] | None:
+    command = [str(DARKBLOOM_BIN), "models", "list", "--all", "--json"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return _parse_installed_model_ids(result.stdout)
+
+
+def _inventory_allows(target: str) -> bool:
+    installed = _fetch_installed_ids()
+    return installed is not None and target in installed
 
 
 def _widget_thermal() -> str | None:
@@ -168,9 +227,12 @@ def _should_switch(target: str | None, state: dict[str, object] | None) -> bool:
         return False
     if target == state.get("current_model") or state.get("inference_active", True):
         return False
+    now = time.time()
+    if not _daemon_is_fresh(state, now):
+        return False
     if _daemon_trust(state) != HARDWARE_TRUST:
         return False
-    if _matching_load_error_is_unsafe(target, state, time.time()):
+    if _matching_load_error_is_unsafe(target, state, now):
         return False
     return _widget_thermal() not in _HOT_THERMAL
 
@@ -198,6 +260,9 @@ def _verify(target: str) -> bool:
 
 
 def execute_switch(target: str) -> bool:
+    if not _inventory_allows(target):
+        log(f"refusing switch to {target}: inventory unknown, malformed, or missing the target")
+        return False
     log(f"idle gap found, executing switch to {target}")
     result = _run_start(target)
     if result.returncode != 0 and "Input/output error" in (result.stderr or ""):
@@ -220,8 +285,11 @@ def _wait_for_idle_gap(deadline: float) -> str | None:
         if not _should_switch(target, _daemon_state_or_none()):
             time.sleep(POLL_SECONDS)
             continue
-        if read_target_state()[0] == target and _should_switch(target, _daemon_state_or_none()):
+        if (target is not None and read_target_state()[0] == target
+                and _should_switch(target, _daemon_state_or_none())
+                and _inventory_allows(target)):
             return target
+        time.sleep(POLL_SECONDS)
     return None
 
 

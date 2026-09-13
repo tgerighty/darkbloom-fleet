@@ -148,6 +148,7 @@ def _live_daemon(**fields) -> DaemonState:
 
 def test_maybe_execute_reports_success_and_failure(monkeypatch, caplog):
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a", "b"))
     monkeypatch.setattr(collector.remote, "execute_switch", lambda cfg, target: None)
     assert collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
     monkeypatch.setattr(collector.remote, "execute_switch", _boom)
@@ -164,13 +165,6 @@ def test_maybe_execute_reapplies_host_gates_on_the_fresh_read(monkeypatch):
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
     executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
     assert executed is False and "safety gate" in error
-
-
-def test_maybe_execute_does_not_treat_missing_inventory_on_the_fresh_read_as_a_block(monkeypatch):
-    monkeypatch.setattr(collector, "_fetch_daemon",
-                        lambda cfg, now: _live_daemon(installed_models=None))
-    monkeypatch.setattr(collector.remote, "execute_switch", lambda cfg, target: None)
-    assert collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
 
 
 def test_unknown_inventory_on_the_tick_keeps_current_instead_of_switching(monkeypatch):

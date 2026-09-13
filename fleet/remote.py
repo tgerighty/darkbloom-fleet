@@ -281,6 +281,7 @@ def launch_fast_switch_watcher(cfg: Config, target: str, max_seconds: float) -> 
         "valid_targets": list(cfg.models),
         "max_seconds": max_seconds,
         "restart_backoff_seconds": cfg.restart_backoff_seconds,
+        "daemon_freshness_seconds": cfg.daemon_freshness_seconds,
         "written_at": time.time(),
     })
     script_tmp = f"{FAST_SWITCH_SCRIPT_PATH}.tmp"

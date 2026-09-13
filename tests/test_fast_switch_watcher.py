@@ -13,8 +13,10 @@ from pathlib import Path
 import pytest
 
 SCRIPT_PATH = Path(__file__).parent.parent / "fleet" / "remote_assets" / "fast_switch_watcher.py"
-IDLE_ON_A = {"current_model": "a", "inference_active": False, "trust": {"trust_level": "hardware"}}
-BUSY_ON_A = {"current_model": "a", "inference_active": True, "trust": {"trust_level": "hardware"}}
+IDLE_ON_A = {"current_model": "a", "inference_active": False, "trust": {"trust_level": "hardware"},
+             "written_at": time.time()}
+BUSY_ON_A = {"current_model": "a", "inference_active": True, "trust": {"trust_level": "hardware"},
+             "written_at": time.time()}
 
 
 def _load_module():
@@ -33,6 +35,9 @@ def watcher(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "LOG", tmp_path / "fast_switch.log")
     monkeypatch.setattr(module, "WIDGET_METRICS_DB_PATH", tmp_path / "metrics.db")
     monkeypatch.setattr(module, "POLL_SECONDS", 0.01)
+    module.TARGET_STATE_PATH.write_text(json.dumps({"daemon_freshness_seconds": 1_000_000.0}))
+    module._real_fetch_installed_ids = module._fetch_installed_ids
+    monkeypatch.setattr(module, "_fetch_installed_ids", lambda: ("a", "b"))
     return module
 
 
@@ -84,6 +89,7 @@ def test_read_target_state_accepts_a_valid_target(watcher):
 
 
 def test_read_target_state_defaults_when_the_file_is_missing(watcher):
+    watcher.TARGET_STATE_PATH.unlink(missing_ok=True)
     target, valid, max_seconds = watcher.read_target_state()
     assert target is None and valid == () and max_seconds == watcher.DEFAULT_MAX_SECONDS
 
@@ -101,13 +107,15 @@ def test_failure_backoff_is_off_without_a_recorded_failure(watcher):
 
 
 def test_an_idle_gap_that_survives_the_recheck_returns_the_target(watcher, monkeypatch):
-    watcher.TARGET_STATE_PATH.write_text('{"target": "b", "valid_targets": ["a", "b"]}')
+    watcher.TARGET_STATE_PATH.write_text(
+        '{"target": "b", "valid_targets": ["a", "b"], "daemon_freshness_seconds": 1000000}')
     monkeypatch.setattr(watcher, "read_daemon_state", lambda: IDLE_ON_A)
     assert watcher._wait_for_idle_gap(time.time() + 5) == "b"
 
 
 def test_a_request_starting_during_the_recheck_stops_the_switch(watcher, monkeypatch):
-    watcher.TARGET_STATE_PATH.write_text('{"target": "b", "valid_targets": ["a", "b"]}')
+    watcher.TARGET_STATE_PATH.write_text(
+        '{"target": "b", "valid_targets": ["a", "b"], "daemon_freshness_seconds": 1000000}')
     states = iter([IDLE_ON_A])
     monkeypatch.setattr(watcher, "read_daemon_state", lambda: next(states, BUSY_ON_A))
     assert watcher._wait_for_idle_gap(time.time() + 0.3) is None
@@ -128,7 +136,7 @@ def test_verification_rides_out_a_half_written_state_file(watcher, monkeypatch):
 
 
 def test_should_switch_requires_hardware_trust(watcher):
-    idle = {"current_model": "a", "inference_active": False}
+    idle = {"current_model": "a", "inference_active": False, "written_at": time.time()}
     assert watcher._should_switch("b", idle) is False
     idle["trust"] = {"trust_level": "self_signed"}
     assert watcher._should_switch("b", idle) is False
@@ -145,6 +153,8 @@ def test_should_switch_rejects_a_matching_load_error_without_a_timestamp(watcher
     assert watcher._should_switch("b", state) is True
     state["last_model_load_error"] = {"model": "c", "at": time.time() - 5}
     assert watcher._should_switch("b", state) is True
+    state["last_model_load_error"] = {"model": "b", "at": time.time() + 10_000}
+    assert watcher._should_switch("b", state) is False
 
 
 def _write_thermal(path: Path, thermal: str | None) -> None:
@@ -167,3 +177,42 @@ def test_missing_widget_thermal_does_not_block(watcher):
     assert watcher._should_switch("b", IDLE_ON_A) is True
     _write_thermal(watcher.WIDGET_METRICS_DB_PATH, "nominal")
     assert watcher._should_switch("b", IDLE_ON_A) is True
+
+
+def test_should_switch_refuses_stale_missing_invalid_and_accepts_fresh_written_at(watcher):
+    now = time.time()
+    watcher.TARGET_STATE_PATH.write_text(json.dumps({"daemon_freshness_seconds": 90.0}))
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": now - 91}) is False
+    missing = {**IDLE_ON_A}
+    del missing["written_at"]
+    assert watcher._should_switch("b", missing) is False
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": "nope"}) is False
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": float("nan")}) is False
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": float("inf")}) is False
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": 0}) is False
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": now}) is True
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": now - 1}) is True
+    watcher.TARGET_STATE_PATH.write_text("{}")
+    assert watcher._should_switch("b", {**IDLE_ON_A, "written_at": now}) is False
+
+
+def test_wait_refuses_unknown_malformed_and_absent_inventory(watcher, monkeypatch):
+    watcher.TARGET_STATE_PATH.write_text(json.dumps({
+        "target": "b", "valid_targets": ["a", "b"], "daemon_freshness_seconds": 1_000_000.0,
+    }))
+    monkeypatch.setattr(watcher, "read_daemon_state", lambda: IDLE_ON_A)
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: None)
+    assert watcher._wait_for_idle_gap(time.time() + 0.2) is None
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: ("a",))
+    assert watcher._wait_for_idle_gap(time.time() + 0.2) is None
+    monkeypatch.setattr(watcher, "_fetch_installed_ids", lambda: ("a", "b"))
+    assert watcher._wait_for_idle_gap(time.time() + 5) == "b"
+
+
+def test_parse_installed_model_ids_is_the_bounded_stdlib_schema(watcher):
+    assert watcher._parse_installed_model_ids('{"models": [{"id": "a"}, {"id": "b"}]}') == ("a", "b")
+    assert watcher._parse_installed_model_ids('{"models": []}') == ()
+    assert watcher._parse_installed_model_ids("not json") is None
+    assert watcher._parse_installed_model_ids('{"models": [{"id": "a"}, "skip"]}') is None
+    too_long = "m" * (watcher._MAX_MODEL_ID_LENGTH + 1)
+    assert watcher._parse_installed_model_ids('{"models": [{"id": "' + too_long + '"}]}') is None

@@ -1,5 +1,11 @@
 # Progress
 
+- ~~[NOW] [FIX] Release gates: freshness, inventory re-check, bounded serving, future timestamps, proposed badge~~
+  (2026-09-13: watcher mirrors LIVE written_at freshness; inventory is
+  re-checked immediately before every real start; serving_percentages reads
+  30 days plus the left-boundary row and a lifetime LEAD aggregate; future
+  load errors stay blocked; missing trust keeps the current model; each
+  healthy card shows KEEP or the proposed target under LIVE/OBSERVE)
 - ~~[NOW] [REFACTOR] Share account-wide /api/status maps and one serving history per host~~
   (2026-09-13: provider_hosts and latest_self_route once per GET; each host
   derives 1h/7h/24h/30d/lifetime serving from one daemon_snapshots read)

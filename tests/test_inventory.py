@@ -4,6 +4,7 @@ import logging
 
 from fleet import collector, remote
 from fleet.types import CapacitySample, DaemonState, Decision
+from tests.test_collector_tick import _boom, _live_daemon
 
 DAEMON = DaemonState("a", ("a",), False, 1, 100.0, True)
 
@@ -148,6 +149,37 @@ def test_a_model_missing_from_disk_is_dropped_from_the_active_ema(monkeypatch):
     collector.run_tick(_cfg(), None)
     assert seen["ema"].keys() == {"a"}
     assert stored["ema"].keys() == {"a"}
+
+
+def test_maybe_execute_aborts_when_fresh_inventory_is_unknown(monkeypatch):
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: None)
+    monkeypatch.setattr(collector.remote, "execute_switch", _boom)
+    executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
+    assert executed is False and error is not None and "inventory" in error
+
+
+def test_maybe_execute_aborts_when_the_fresh_target_is_not_installed(monkeypatch):
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a",))
+    monkeypatch.setattr(collector.remote, "execute_switch", _boom)
+    executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
+    assert executed is False and error is not None and "inventory" in error
+
+
+def test_maybe_execute_aborts_when_the_switch_target_is_absent(monkeypatch):
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a", "b"))
+    monkeypatch.setattr(collector.remote, "execute_switch", _boom)
+    executed, error = collector._maybe_execute(_cfg(), None, Decision(None, "r", "SWITCH"), 100.0)
+    assert executed is False and error is not None and "inventory" in error
+
+
+def test_maybe_execute_starts_when_fresh_inventory_contains_the_target(monkeypatch):
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a", "b"))
+    monkeypatch.setattr(collector.remote, "execute_switch", lambda cfg, target: None)
+    assert collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
 
 
 def test_a_failing_inventory_read_is_logged_and_unknown(monkeypatch, caplog):

@@ -1,4 +1,4 @@
-import { esc } from "./ui.js?v=3";
+import { esc } from "./ui.js?v=4";
 export { esc };
 
 const TD = "</td><td>";
@@ -238,11 +238,21 @@ function payoutsSection(rows, unattributed) {
     "<tbody>" + body + "</tbody></table></div></details>";
 }
 
+function proposedIndicator(s) {
+  const latest = (s.recent_decisions || [])[0];
+  const switchLike = latest && (latest.action === "SWITCH" || latest.action === "SWITCH_WHEN_IDLE");
+  const full = (switchLike && latest.target_model) ? String(latest.target_model) : "KEEP";
+  const shown = full.length <= 10 ? full : full.slice(0, 9) + "\u2026";
+  return '<span class="badge proposed" role="status" title="' + esc(full) +
+    '" aria-label="' + esc(full) + '">' + esc(shown) + SPAN_END;
+}
+
 function headHtml(s, host) {
   const mode = s.mode || "OBSERVE";
   return '<div class="card-head"><h1>' + esc(host.label) + '</h1><span class="sub">' +
-    esc(host.spec) + " · daemon " + fmtAge(s.as_of) + '</span><span class="badge ' +
-    String(mode).toLowerCase() + '">' + esc(mode) + SPAN_DIV_END;
+    esc(host.spec) + " · daemon " + fmtAge(s.as_of) + '</span><span class="head-flags">' +
+    '<span class="badge ' + String(mode).toLowerCase() + '">' + esc(mode) + SPAN_END +
+    proposedIndicator(s) + SPAN_DIV_END;
 }
 
 export function errorCard(s, err) {

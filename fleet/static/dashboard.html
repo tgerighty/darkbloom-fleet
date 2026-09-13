@@ -46,6 +46,10 @@
   .card-head { display: flex; align-items: baseline; gap: 0.7rem; padding: 0.8rem 1rem 0; }
   .card-head h1 { font-size: 1.05rem; margin: 0; }
   .card-head .sub { margin: 0; flex: 1; }
+  .card-head .head-flags { display: flex; flex-direction: column; align-items: flex-end; gap: 0.2rem;
+                           align-self: center; }
+  .badge.proposed { background: light-dark(#eeeef1, #2a2b30); color: light-dark(#333, #d0d1d4);
+                    font-family: var(--mono); font-size: 0.68rem; padding: 0.1rem 0.45rem; }
   .band { padding: 0.55rem 1rem; margin-top: 0.6rem; font-size: 0.9rem; }
   .band.green { background: light-dark(#e6f4ec, #163b2a); color: light-dark(#1c7c4a, #7fd3a6); }
   .band.amber { background: light-dark(#fdf3df, #3a2d10); color: light-dark(#8a5a00, #d9a441); }
@@ -138,6 +142,6 @@
       <tbody id="demand"></tbody></table>
     </details>
   </section>
-  <script type="module" src="/static/dashboard.js?v=3"></script>
+  <script type="module" src="/static/dashboard.js?v=4"></script>
 </body>
 </html>

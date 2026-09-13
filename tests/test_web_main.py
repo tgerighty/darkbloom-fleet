@@ -67,7 +67,9 @@ def test_status_computes_account_wide_data_once_and_passes_it_to_each_host(monke
     app = web.create_app((SimpleNamespace(host_label="m3"), SimpleNamespace(host_label="m1")), pool="P")
     assert asyncio.run(_route(app, "/api/status").endpoint()) == {"hosts": [{"label": "m3"}, {"label": "m1"}]}
     assert shared_calls == ["P"]
-    assert seen == [("m3", attributed, self_route), ("m1", attributed, self_route)]
+    assert {row[0] for row in seen} == {"m3", "m1"}
+    assert all(row[1] is attributed and row[2] is self_route for row in seen)
+    assert len(seen) == 2
 
 
 def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch, caplog):

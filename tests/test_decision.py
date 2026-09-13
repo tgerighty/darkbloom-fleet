@@ -163,10 +163,10 @@ def test_a_slightly_future_load_error_still_blocks():
     assert apply_host_gates(SWITCH, daemon, NOW).action == "BLOCKED"
 
 
-def test_a_far_future_load_error_does_not_block():
+def test_a_far_future_load_error_blocks():
     daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
                      last_model_load_error_at=NOW + LOAD_ERROR_BLOCK_SECONDS + 1)
-    assert apply_host_gates(SWITCH, daemon, NOW) == SWITCH
+    assert apply_host_gates(SWITCH, daemon, NOW).action == "BLOCKED"
 
 
 def test_unknown_inventory_keeps_current_instead_of_switching():

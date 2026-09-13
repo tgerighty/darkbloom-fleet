@@ -1,8 +1,8 @@
-import { hourlySection } from "./hourly.js?v=3";
-import { esc, renderHosts } from "./host.js?v=3";
+import { hourlySection } from "./hourly.js?v=4";
+import { esc, renderHosts } from "./host.js?v=4";
 import {
   captureFocus, captureUiState, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
-} from "./ui.js?v=3";
+} from "./ui.js?v=4";
 
 let servingWindow = "24h";
 let lastStatus = null;

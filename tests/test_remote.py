@@ -188,6 +188,7 @@ def test_watcher_deploy_fails_fast_and_installs_both_files_before_launching(monk
     moves = [i for i, line in enumerate(lines) if line.startswith("mv -f ")]
     assert lines[0] == "set -e"
     assert len(moves) == 2 and max(moves) < launch
+    assert '"daemon_freshness_seconds": 90.0' in commands[0]
 
 
 def test_inventory_fetch_is_a_separate_all_json_list_command(monkeypatch):

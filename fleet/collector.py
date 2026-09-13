@@ -110,7 +110,7 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: f
     """Live mode only. Returns (executed, error). The restart-retry backoff is
     applied by the caller before storing the decision, so a deferred switch
     never reaches here as a SWITCH. Re-runs thermal/trust/load-error on a
-    fresh daemon read; inventory is not on that read and is not re-checked."""
+    fresh daemon read, then re-checks on-disk inventory before the start."""
     if decision.action != "SWITCH" or not cfg.live_execution:
         return False, None
     fresh_now = time.time()
@@ -120,8 +120,13 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: f
     gated = decision_mod.apply_host_gates(decision, fresh_daemon, fresh_now)
     if gated.action != "SWITCH":
         return False, "aborted: host safety gate failed on the fresh daemon read"
+    installed = _fetch_installed(cfg)
+    gated = decision_mod.apply_inventory_gate(
+        gated, dataclasses.replace(fresh_daemon, installed_models=installed))
+    if gated.action != "SWITCH" or gated.target is None:
+        return False, "aborted: inventory gate failed on the fresh read"
     try:
-        remote.execute_switch(cfg, decision.target)
+        remote.execute_switch(cfg, gated.target)
     except Exception as error:  # noqa: BLE001
         log.warning("switch execution failed: %s", error)
         return False, "switch failed"

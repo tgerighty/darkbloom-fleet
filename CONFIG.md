@@ -153,8 +153,9 @@ earnings-ledger data (2026-09-09 05:54 -> 2026-09-11 12:22 local):
   executes): a fresh thermal state of `serious` or `critical` returns
   `BLOCKED`. A present `trust_level` other than `hardware` returns `KEEP`
   (no restart during attestation). Absent trust is not treated as hardware
-  and does not block. A proposed target whose last load error is at most
-  120 seconds old returns `BLOCKED`; older errors and other models do not.
+  and keeps the current model (no restart). A proposed target whose last
+  load error is in the future or at most 120 seconds in the past returns
+  `BLOCKED`; older past errors and other models do not.
 - **30-second restart-retry backoff** after a failed switch attempt, not an
   immediate retry - also learned the hard way: `darkbloom start` can hit
   `launchctl bootstrap failed: ... Input/output error` when the previous

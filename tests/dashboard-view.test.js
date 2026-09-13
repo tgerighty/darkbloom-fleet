@@ -187,6 +187,65 @@ describe("malformed host isolation", function () {
   });
 });
 
+describe("proposed-action indicator", function () {
+  function head(html) {
+    const start = html.indexOf("card-head");
+    const band = html.indexOf('class="band');
+    return html.slice(start, band);
+  }
+
+  it("shows KEEP under the mode badge when there is no switch proposal", function () {
+    const html = renderHost(host(), "24h", "");
+    const hdr = head(html);
+    expect(hdr.indexOf("badge observe")).toBeLessThan(hdr.indexOf("badge proposed"));
+    expect(hdr).toContain('role="status"');
+    expect(hdr).toContain('title="KEEP"');
+    expect(hdr).toContain('aria-label="KEEP"');
+    expect(hdr).toContain(">KEEP</span>");
+    expect(html).not.toContain("<button");
+  });
+
+  it("shows KEEP for a non-switch decision", function () {
+    const html = renderHost(host({ recent_decisions: [{ ...SWITCH, action: "KEEP", target_model: "llama" }] }), "24h", "");
+    expect(head(html)).toContain(">KEEP</span>");
+    expect(head(html)).not.toContain("llama");
+  });
+
+  it("shows the proposed target for SWITCH and SWITCH_WHEN_IDLE", function () {
+    const switched = renderHost(host({ recent_decisions: [SWITCH] }), "24h", "");
+    expect(head(switched)).toContain(">llama</span>");
+    expect(head(switched)).toContain('title="llama"');
+    const idle = renderHost(host({ recent_decisions: [{ ...SWITCH, action: "SWITCH_WHEN_IDLE" }] }), "24h", "");
+    expect(head(idle)).toContain(">llama</span>");
+  });
+
+  it("truncates a long target and keeps the full name in title and aria-label", function () {
+    const target = "gemma-4-26b-qat-4bit";
+    const html = renderHost(host({ recent_decisions: [{ ...SWITCH, target_model: target }] }), "24h", "");
+    const hdr = head(html);
+    expect(hdr).toContain(">" + target.slice(0, 9) + "…</span>");
+    expect(hdr).toContain('title="' + target + '"');
+    expect(hdr).toContain('aria-label="' + target + '"');
+    expect(hdr).not.toContain(">" + target + "</span>");
+  });
+
+  it("escapes an untrusted proposed target in text and attributes", function () {
+    const target = 'x"><img src=x onerror="alert(1)';
+    const html = renderHost(host({ recent_decisions: [{ ...SWITCH, target_model: target }] }), "24h", "");
+    const hdr = head(html);
+    expect(hdr).toContain("title=\"x&quot;&gt;&lt;img src=x onerror=&quot;alert(1)\"");
+    expect(hdr).toContain("aria-label=\"x&quot;&gt;&lt;img src=x onerror=&quot;alert(1)\"");
+    expect(hdr).not.toContain("<img src=x");
+    expect(hdr).not.toContain("onerror=\"alert(1)\"");
+  });
+
+  it("does not put the proposed indicator on an error card", function () {
+    const html = renderHost({ host: { label: "M1", spec: "" }, mode: "OBSERVE", error: "timeout" }, "24h", "");
+    expect(html).not.toContain("badge proposed");
+    expect(html).not.toContain("head-flags");
+  });
+});
+
 describe("demand merge", function () {
   it("shows an empty row and marks the host that is on that model", function () {
     expect(renderDemand([], [])).toContain("no demand samples yet");

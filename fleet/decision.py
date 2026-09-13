@@ -102,8 +102,9 @@ def decide(
 
 
 def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decision | None:
-    """BLOCKED when the target matches a load error with no valid timestamp or
-    one at most LOAD_ERROR_BLOCK_SECONDS old. None means this gate does not fire."""
+    """BLOCKED when the target matches a load error with no valid timestamp, a
+    future timestamp, or one at most LOAD_ERROR_BLOCK_SECONDS in the past.
+    None means this gate does not fire."""
     err_model = daemon.last_model_load_error_model
     err_at = daemon.last_model_load_error_at
     if not err_model or result.target != err_model:
@@ -114,7 +115,7 @@ def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decis
             f"{result.reason}; blocked: {err_model} failed to load with no timestamp",
             "BLOCKED",
         )
-    if abs(now - err_at) <= LOAD_ERROR_BLOCK_SECONDS:
+    if err_at > now or (now - err_at) <= LOAD_ERROR_BLOCK_SECONDS:
         age = abs(now - err_at)
         return Decision(
             result.target,
