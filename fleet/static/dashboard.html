@@ -10,6 +10,10 @@
          background: light-dark(#f5f5f7, #17181c); color: light-dark(#1c1d21, #e7e8ea); }
   h1 { font-size: 1.3rem; margin-bottom: 0.2rem; }
   .sub { opacity: 0.7; font-size: 0.9rem; margin-bottom: 1.4rem; }
+  .fleet-bar { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+               gap: 0.6rem 1.2rem; margin-bottom: 1.4rem; }
+  .fleet-bar .sub { margin: 0; }
+  .fleet-bar select { font: inherit; }
   .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600; }
   .badge.observe { background: #2b6cb0; color: #fff; }
   .badge.live { background: #c0392b; color: #fff; }
@@ -37,6 +41,8 @@
   .card { background: light-dark(#fff, #1c1d21); border: 1px solid light-dark(#0002, #fff2);
           border-left: 3px solid light-dark(#d5d5da, #4a4b52); border-radius: 10px; overflow: hidden; }
   .card.earning { border-left-color: light-dark(#1c7c4a, #7fd3a6); }
+  .card.stale, .card.off { border-left-color: light-dark(#c0392b, #e07a70); }
+  .cards.stale-poll { outline: 1px solid #c0392b; }
   .card-head { display: flex; align-items: baseline; gap: 0.7rem; padding: 0.8rem 1rem 0; }
   .card-head h1 { font-size: 1.05rem; margin: 0; }
   .card-head .sub { margin: 0; flex: 1; }
@@ -44,6 +50,7 @@
   .band.green { background: light-dark(#e6f4ec, #163b2a); color: light-dark(#1c7c4a, #7fd3a6); }
   .band.amber { background: light-dark(#fdf3df, #3a2d10); color: light-dark(#8a5a00, #d9a441); }
   .band.grey { background: light-dark(#eeeef1, #26272c); color: light-dark(#555, #9a9ca3); }
+  .band.red { background: light-dark(#fdecea, #3b1614); color: light-dark(#a12622, #e07a70); }
   .band-line { display: flex; justify-content: space-between; gap: 1rem; font-weight: 600; }
   .band-line .mono { font-weight: 400; }
   .band-sub { font-size: 0.8rem; opacity: 0.85; margin-top: 0.15rem; }
@@ -58,6 +65,7 @@
   .gtrack.wide { height: 8px; border-radius: 4px; }
   .gfill { height: 100%; background: light-dark(#1f1a5e, #8b86d9); }
   .gfill.good { background: light-dark(#1c7c4a, #7fd3a6); }
+  .gfill.err { background: light-dark(#c0392b, #d6604f); }
   .gfill.cache { background: light-dark(#8b86d9, #55507f); }
   .gpu-row { display: flex; align-items: center; gap: 0.8rem; margin: 0.5rem 0; }
   .gpu-row .gtrack { flex: 1; }
@@ -69,8 +77,7 @@
           font-size: 0.78rem; background: light-dark(#eeeef1, #2a2b30); }
   .chip.active { background: light-dark(#e8e8f5, #2c2c48); color: light-dark(#1f1a5e, #8b86d9);
                  border: 1px solid light-dark(#1f1a5e55, #8b86d955); }
-  .idle-note { font-size: 0.8rem; opacity: 0.75; margin: 0.5rem 0; }
-  .idle-note .glabel { margin-right: 0.4rem; }
+  .chip.current { border: 1px solid light-dark(#1f1a5e55, #8b86d955); }
 
   .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin: 0.7rem 0; }
   .tile { background: light-dark(#f7f7f8, #232429); border-radius: 8px; padding: 0.45rem 0.7rem; }
@@ -111,11 +118,26 @@
 </head>
 <body>
   <h1>darkbloom-fleet</h1>
-  <div class="sub" id="fleet-subtitle">loading…</div>
-  <section><h2>Live demand (network)</h2>
-    <table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead>
-    <tbody id="demand"></tbody></table></section>
+  <div class="fleet-bar">
+    <div class="sub" id="fleet-subtitle" aria-live="polite">loading…</div>
+    <label>Serving window
+      <select id="serving-window" aria-label="Serving window">
+        <option value="1h">1h</option>
+        <option value="7h">7h</option>
+        <option value="24h" selected>24h</option>
+        <option value="30d">30d</option>
+        <option value="lifetime">lifetime</option>
+      </select>
+    </label>
+  </div>
   <div id="hosts" class="cards"></div>
-  <script type="module" src="/static/dashboard.js?v=2"></script>
+  <section>
+    <details class="fold">
+      <summary>Live demand (network)</summary>
+      <table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead>
+      <tbody id="demand"></tbody></table>
+    </details>
+  </section>
+  <script type="module" src="/static/dashboard.js?v=3"></script>
 </body>
 </html>

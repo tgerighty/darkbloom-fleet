@@ -1,5 +1,10 @@
 # Progress
 
+- ~~[NOW] [FEATURE] Dashboard glance, resilient refresh, and declutter~~
+  (2026-09-13: current model, serving/idle, and latest decision on the band
+  with OBSERVE would-switch; preserve details/scroll/focus across redraw;
+  isolate a bad host or poll; clamp hourly portions; remove placeholder
+  chrome; hosts sit above demand; serving window is global)
 - [NOW] [FEATURE] "Jobs · hourly buckets" panel per host card (PR #6):
   last-24 h attributed payout counts bucketed by hour with a letter legend
   and range share (`hourly_jobs` in /api/status, fleet/hourly.py), the

@@ -34,4 +34,17 @@ describe("hourly job rendering", function () {
 
     expect(html).toContain(" ".repeat(40) + "    0% / 0%");
   });
+
+  it("clamps a long portions array so the bar cannot throw", function () {
+    const portions = [];
+    for (let i = 0; i < 41; i++) portions.push("gemma");
+    const html = hourlySection({ hourly_jobs: {
+      legend: [{ letter: "G", model: "gemma" }],
+      rows: [{ hour: 0, jobs: 41, portions: portions, serving_percentage: 100, idle_percentage: 0 }],
+    } });
+    expect(html).toContain("data-fold=\"hourly\"");
+    expect(html).toContain("payout-bearing 90-second portion");
+    // legend letter plus 40 bar cells; a 41st portion would add one more G
+    expect(html.match(/class="m0">G</g)).toHaveLength(41);
+  });
 });
