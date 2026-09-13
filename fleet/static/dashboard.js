@@ -17,6 +17,7 @@ const BANDS = {
   STALE: "STALE — daemon state not fresh",
   OFF: "OFF — no daemon snapshot",
 };
+const HEALTH_TONE = { DAEMON_DOWN: "down", DEAD_SESSION: "down", THRASH: "warn", STALE: "warn", HEALTHY: "ok" };
 const EMPTY_CARD = { status: null, resources: {}, gpu: {}, loaded: [], catalog: [], kpis: {}, slots: [] };
 const EMPTY_ROUT = { models: [], session: null, self_route_as_of: null, last_served_at: null, switch_cost: null };
 let servingWindow = "24h";
@@ -61,6 +62,12 @@ function renderServing(shares) {
       '<div class="bar-track"><div class="bar-fill' + (model === "idle" ? " idle" : "") + '" style="width:' + pct + '%"></div></div>' +
       '<div>' + pct + '%</div></div>';
   }).join("");
+}
+
+function healthBadge(h) {
+  const state = h?.state || "HEALTHY";
+  return '<span class="badge ' + (HEALTH_TONE[state] || "ok") + '" title="' + esc(h?.detail) + '">' +
+    esc(state) + SPAN_END;
 }
 
 function bandHtml(band) {
@@ -209,7 +216,8 @@ function renderHost(s, index) {
   const catalog = card.catalog.map(function (m) { return chip(m, false); });
   return '<div class="card ' + state.toLowerCase() + '">' +
     '<div class="card-head"><h1>' + esc(s.host.label) + '</h1><span class="sub">' + esc(s.host.spec) +
-    ' · daemon ' + fmtAge(s.as_of) + '</span><span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + SPAN_DIV_END +
+    ' · daemon ' + fmtAge(s.as_of) + '</span><span class="badge ' + s.mode.toLowerCase() + '">' + s.mode + SPAN_END +
+    healthBadge(s.health) + DIV_END +
     bandHtml(card.status) +
     '<div class="card-body">' +
     resourceRow(s, card) + gpuRow(card.gpu) +

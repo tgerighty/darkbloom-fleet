@@ -1,5 +1,6 @@
 # Progress
 
+- [NOW] [FEATURE] Per-host health badge on each card: DAEMON_DOWN, DEAD_SESSION, THRASH, STALE, or HEALTHY from daemon_snapshots and demand_samples (fleet/health.py)
 - [NOW] [FEATURE] "Jobs · hourly buckets" panel per host card (PR #6):
   last-24 h attributed payout counts bucketed by hour with a letter legend
   and range share (`hourly_jobs` in /api/status, fleet/hourly.py), the
