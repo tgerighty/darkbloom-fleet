@@ -45,6 +45,20 @@ def _assign_letters(order: list[str]) -> dict[str, str]:
     return letters
 
 
+def _hour_rows(hours: range, newest: int, now: float, buckets: dict[int, dict[str, int]],
+               portions: dict[int, list[Counter[str]]]) -> list[Row]:
+    output = []
+    for hour in hours:
+        size = PORTIONS if hour < newest else max(0, min(PORTIONS, int((now - hour + PORTION_SECONDS - 1) // PORTION_SECONDS)))
+        values = [max(counts, key=lambda model, values=counts: (values[model], model)) if counts else None
+                  for counts in portions[hour][:size]]
+        busy = sum(value is not None for value in values)
+        serving = round(100 * busy / size) if size else 0
+        output.append({"hour": hour, "jobs": sum(buckets[hour].values()), "portions": values,
+                       "serving_percentage": serving, "idle_percentage": 100 - serving if size else 0})
+    return output
+
+
 def hourly_jobs(pool: ConnectionPool, host: str, hashes: list[str], now: float) -> Row:
     """Return one model letter or idle dot for each elapsed hour portion."""
     newest = int(now // HOUR_SECONDS) * HOUR_SECONDS
@@ -67,16 +81,7 @@ def hourly_jobs(pool: ConnectionPool, host: str, hashes: list[str], now: float) 
         for model in sorted(buckets[hour]):
             totals[model] = totals.get(model, 0) + buckets[hour][model]
     letters = _assign_letters(list(totals))
-    output_rows = []
-    for hour in hours:
-        size = PORTIONS if hour < newest else max(0, min(PORTIONS, int((now - hour + PORTION_SECONDS - 1) // PORTION_SECONDS)))
-        values = [max(counts, key=lambda model: (counts[model], model)) if counts else None
-                  for counts in portions[hour][:size]]
-        busy = sum(value is not None for value in values)
-        serving = round(100 * busy / size) if size else 0
-        output_rows.append({"hour": hour, "jobs": sum(buckets[hour].values()), "portions": values,
-                            "serving_percentage": serving, "idle_percentage": 100 - serving if size else 0})
     return {
         "legend": [{"letter": letters[m], "model": m} for m in sorted(totals)],
-        "rows": output_rows,
+        "rows": _hour_rows(hours, newest, now, buckets, portions),
     }
