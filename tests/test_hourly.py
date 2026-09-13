@@ -42,3 +42,11 @@ def test_buckets_letters_and_range_share(fake_pool):
                              {"hour": 93_600, "jobs": 5,
                               "counts": {"gemma-4-26b-qat": 3, "gpt-oss-20b": 2}}]
     assert pool.calls == [(hourly._HOURLY_SQL, ("h", 100_000.0 - 86_400, ["s1"]))]
+
+
+def test_more_than_36_models_share_the_overflow_glyph():
+    from fleet.hourly import OVERFLOW, _assign_letters
+    letters = _assign_letters([f"m{i}" for i in range(40)])
+    assert len(letters) == 40
+    assert sum(1 for v in letters.values() if v == OVERFLOW) == 4
+    assert len({v for v in letters.values() if v != OVERFLOW}) == 36
