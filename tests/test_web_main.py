@@ -70,7 +70,7 @@ def test_status_computes_account_wide_data_once_and_passes_it_to_each_host(monke
     assert seen == [("m3", attributed, self_route), ("m1", attributed, self_route)]
 
 
-def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch):
+def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch, caplog):
     def build(cfg, pool, attributed, self_route):
         if cfg.host_label == "m1":
             raise RuntimeError("boom")
@@ -87,10 +87,12 @@ def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch):
     err = body["hosts"][1]
     assert err["host"] == {"label": "m1", "spec": "M1"}
     assert err["demand"] == [] and err["recent_decisions"] == []
-    assert "boom" in err["error"]
+    assert err["error"] == "status unavailable"
+    assert "boom" not in str(err)
+    assert "boom" in caplog.text
 
 
-def test_status_keeps_host_rows_when_shared_data_fails(monkeypatch):
+def test_status_keeps_host_rows_when_shared_data_fails(monkeypatch, caplog):
     def shared(pool):
         raise RuntimeError("votes down")
 
@@ -101,8 +103,9 @@ def test_status_keeps_host_rows_when_shared_data_fails(monkeypatch):
         pool=None,
     )
     body = asyncio.run(_route(app, "/api/status").endpoint())
-    assert all("votes down" in row["error"] for row in body["hosts"])
+    assert all(row["error"] == "status unavailable" for row in body["hosts"])
     assert [row["host"]["label"] for row in body["hosts"]] == ["m3", "m1"]
+    assert "votes down" in caplog.text
 
 
 def test_lifespan_runs_one_loop_per_host_and_waits_for_them_on_shutdown(monkeypatch):

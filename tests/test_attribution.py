@@ -29,6 +29,7 @@ def test_vote_sql_emits_one_row_per_payout_and_rising_host():
     assert "payout_rowid" in sql
     assert "GROUP BY" not in sql
     assert "next_served > s.prev_served" in sql
+    assert "provider_hash <> ''" in sql
 
 
 def test_a_dual_host_rise_leaves_the_hash_unattributed(fake_pool):
@@ -48,6 +49,17 @@ def test_unique_rises_still_assign_a_hash_after_dropping_dual_host_payouts(fake_
 def test_unattributed_recent_counts_null_and_unknown_hashes(fake_pool):
     pool = fake_pool([{"provider_hash": None}, {"provider_hash": "s1"}, {"provider_hash": "no-votes"}])
     assert attribution.unattributed_recent(pool, {"s1": "h"}, now=50.0) == 2
+
+
+def test_empty_provider_hash_is_not_attributed(fake_pool):
+    pool = fake_pool(_vote_rows((1, "", "mac1"), (2, "", "mac1"), (3, None, "mac1")))
+    assert attribution.provider_hosts(pool) == {}
+
+
+def test_unique_payouts_prefer_a_populated_hash():
+    sql = attribution.unique_payouts_sql("provider_hash, created_at", "created_at <= %s")
+    assert "DISTINCT ON (payout_rowid)" in sql
+    assert "(provider_hash IS NULL OR provider_hash = '')" in sql
 
 
 def test_unattributed_recent_uses_the_account_wide_unique_ledger(fake_pool):

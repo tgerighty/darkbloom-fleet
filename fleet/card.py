@@ -27,13 +27,26 @@ def _served_recently(snapshot: Row, last_served_at: float | None, now: float) ->
     return last_served_at is not None and now - last_served_at <= RECENT_TRAFFIC_SECONDS
 
 
-def _status_band(snapshot: Row, last_served_at: float | None, now: float) -> Row:
+def _snapshot_is_stale(snapshot: Row, now: float, freshness_seconds: float) -> bool:
+    if not snapshot.get("fresh"):
+        return True
+    observed_at = snapshot.get("observed_at")
+    if observed_at is None:
+        return False
+    try:
+        return now - float(observed_at) > freshness_seconds
+    except (TypeError, ValueError):
+        return False
+
+
+def _status_band(snapshot: Row, last_served_at: float | None, now: float,
+                 freshness_seconds: float) -> Row:
     """The card's top band: OFF beats nothing, STALE beats everything (a stale
     read is not authoritative about trust or traffic), then trust decides."""
     if not snapshot:
         return {"state": "OFF", "tone": "red", "detail": "no daemon snapshot — host offline or not yet polled",
                 "priority": PRIORITY}
-    if not snapshot.get("fresh"):
+    if _snapshot_is_stale(snapshot, now, freshness_seconds):
         return {"state": "STALE", "tone": "red", "detail": "daemon state not fresh — last read is not authoritative",
                 "priority": PRIORITY}
     if snapshot.get("trust_level") == HARDWARE_TRUST:
@@ -101,12 +114,13 @@ def session_totals(pool: ConnectionPool, since: float, now: float, hashes: list[
 
 
 def build_card(pool: ConnectionPool, host: str, daemon: Row | None,
-               last_served_at: float | None, hashes: list[str], now: float) -> Row:
+               last_served_at: float | None, hashes: list[str], now: float,
+               freshness_seconds: float) -> Row:
     snapshot = daemon or {}
     started_at = float(snapshot.get("started_at") or 0)
     totals = session_totals(pool, started_at, now, hashes)
     return {
-        "status": _status_band(snapshot, last_served_at, now),
+        "status": _status_band(snapshot, last_served_at, now, freshness_seconds),
         "resources": {"thermal_state": snapshot.get("thermal_state"),
                       "memory_pressure": snapshot.get("memory_pressure"),
                       "cpu_usage": snapshot.get("cpu_usage")},

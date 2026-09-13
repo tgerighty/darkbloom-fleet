@@ -20,7 +20,8 @@ Row = dict[str, object]
 # result; _attributed_from_votes drops them.
 _VOTES_SQL = """
 WITH payout AS (
-    SELECT DISTINCT payout_rowid, provider_hash, created_at FROM earnings WHERE provider_hash IS NOT NULL
+    SELECT DISTINCT payout_rowid, provider_hash, created_at FROM earnings
+    WHERE provider_hash IS NOT NULL AND provider_hash <> ''
 ),
 pair AS (
     SELECT host, observed_at AS next_at, requests_served AS next_served, started_at AS next_started,
@@ -43,7 +44,7 @@ def unique_payouts_sql(columns: str, where: str) -> str:
     when both machines ingested the same payout."""
     return (
         f"SELECT DISTINCT ON (payout_rowid) {columns} FROM earnings "
-        f"WHERE {where} ORDER BY payout_rowid, host"
+        f"WHERE {where} ORDER BY payout_rowid, (provider_hash IS NULL OR provider_hash = ''), host"
     )
 
 
@@ -53,9 +54,12 @@ def _attributed_from_votes(rows: list[Row]) -> dict[str, str]:
     hosts_for: dict[int, set[str]] = {}
     hash_for: dict[int, str] = {}
     for row in rows:
+        provider_hash = str(row["provider_hash"] or "")
+        if not provider_hash:
+            continue
         payout_id = int(row["payout_rowid"])
         hosts_for.setdefault(payout_id, set()).add(str(row["host"]))
-        hash_for[payout_id] = str(row["provider_hash"])
+        hash_for[payout_id] = provider_hash
     votes: dict[str, dict[str, int]] = {}
     for payout_id, hosts in hosts_for.items():
         if len(hosts) != 1:

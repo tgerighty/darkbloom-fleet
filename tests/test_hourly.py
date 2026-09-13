@@ -64,3 +64,17 @@ def test_exact_hour_boundary_has_no_phantom_idle_portion_and_ignores_future_rows
     panel = hourly.hourly_jobs(fake_pool(future), ["s1"], 97_200.0)
     assert panel["rows"][0] == {"hour": 97_200, "jobs": 0, "portions": [],
                                 "serving_percentage": 0, "idle_percentage": 0}
+
+
+def test_current_hour_includes_the_in_progress_portion_at_each_90s_boundary(fake_pool):
+    hour = 97_200.0
+    rows = [{"hour": hour, "portion": 1, "model": "a", "n": 1}]
+    panel = hourly.hourly_jobs(fake_pool(rows), ["s1"], hour + 90.0)
+    current = panel["rows"][0]
+    assert current["hour"] == hour
+    assert current["portions"] == [None, "a"]
+    assert current["jobs"] == 1
+    assert current["serving_percentage"] == 50
+    later = hourly.hourly_jobs(fake_pool(rows), ["s1"], hour + 180.0)
+    assert len(later["rows"][0]["portions"]) == 3
+    assert later["rows"][0]["portions"][1] == "a"

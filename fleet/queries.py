@@ -169,6 +169,7 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
         "recent_earnings": recent_earnings(pool, now, hashes),
         "unattributed_recent": unattributed_recent(pool, attributed, now),
         "routability": routability,
-        "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now),
+        "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now,
+                           cfg.daemon_freshness_seconds),
         "hourly_jobs": hourly_jobs(pool, hashes, now),
     }

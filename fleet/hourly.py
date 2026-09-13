@@ -57,11 +57,19 @@ def _percentages(busy: int, size: int) -> tuple[int, int]:
     return serving, 100 - serving
 
 
+def _current_hour_size(hour: int, newest: int, now: float) -> int:
+    if hour < newest:
+        return PORTIONS
+    if now <= hour:
+        return 0
+    return min(PORTIONS, int((now - hour) // PORTION_SECONDS) + 1)
+
+
 def _hour_rows(hours: range, newest: int, now: float, buckets: dict[int, dict[str, int]],
                portions: dict[int, list[Counter[str]]]) -> list[Row]:
     output = []
     for hour in hours:
-        size = PORTIONS if hour < newest else max(0, min(PORTIONS, int((now - hour + PORTION_SECONDS - 1) // PORTION_SECONDS)))
+        size = _current_hour_size(hour, newest, now)
         values = [max(counts, key=lambda model, values=counts: (values[model], model)) if counts else None
                   for counts in portions[hour][:size]]
         busy = sum(value is not None for value in values)

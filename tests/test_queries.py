@@ -125,7 +125,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
                                         hourly=hourly))
     status = queries.build_status(
         SimpleNamespace(host_label="M3 label", host_id="m3", host_spec="M3 Max", live_execution=False,
-                        switch_cost_seconds=300.0), pool, attributed, self_route)
+                        switch_cost_seconds=300.0, daemon_freshness_seconds=90.0), pool, attributed, self_route)
     assert status["host"] == {"label": "M3 label", "spec": "M3 Max"} and status["mode"] == "OBSERVE"
     assert status["current_model"] == "a" and status["daemon_fresh"] is True
     assert status["earnings_usd_24h"] == 2.5 and status["earnings_usd_1h"] == 0.5
@@ -196,7 +196,8 @@ def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     pool = fake_pool(*_status_responses([], [], []))
     status = queries.build_status(SimpleNamespace(host_label="m1", host_id="m1", host_spec="?", live_execution=True,
-                                                  switch_cost_seconds=300.0), pool, {}, (None, {}))
+                                                  switch_cost_seconds=300.0, daemon_freshness_seconds=90.0),
+                                  pool, {}, (None, {}))
     assert status["current_model"] is None and status["mode"] == "LIVE"
     assert status["serving"]["1h"] == {"idle": 100.0} and status["demand"] == []
     assert status["card"]["status"]["state"] == "OFF" and status["card"]["kpis"]["tokens"] == 4_000
@@ -216,7 +217,8 @@ def test_shared_status_data_is_attribution_plus_self_route(fake_pool):
 
 def _host_cfg(hid):
     return SimpleNamespace(
-        host_label=hid, host_id=hid, host_spec="?", live_execution=False, switch_cost_seconds=300.0)
+        host_label=hid, host_id=hid, host_spec="?", live_execution=False, switch_cost_seconds=300.0,
+        daemon_freshness_seconds=90.0)
 
 
 def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
