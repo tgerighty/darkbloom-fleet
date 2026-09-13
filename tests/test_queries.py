@@ -66,13 +66,14 @@ def _status_responses(daemon, demand, decisions, votes=(), card_totals=None, hou
     attribution votes, the routability panel (self-route probe, last-served,
     measured switch cost), earnings x2, four fixed windows (before + rows
     each), lifetime's first snapshot, decisions, earnings rows, unattributed
-    recent hashes, the card's session payout totals, the hourly jobs buckets."""
+    recent hashes, the card's session payout totals, the hourly jobs buckets,
+    the health detector (last-hour snapshots when the daemon is fresh)."""
     return [daemon, demand, list(votes), [{"t": None}], [], [{"median": None, "n": 0}],
             [{"total": 2_500_000}], [{"total": 500_000}], *([[], []] * 4), [{"t": None}], decisions,
             [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}],
             [{"provider_hash": None}, {"provider_hash": "no-votes"}],
             card_totals or [{"tokens": 4_000, "requests": 2}],
-            hourly or []]
+            hourly or [], []]
 
 
 def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
@@ -101,6 +102,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     assert status["unattributed_recent"] == 2
     assert status["card"]["status"]["state"] == "ATTESTING"  # no trust level on the snapshot
     assert status["card"]["kpis"]["tokens"] == 4_000 and status["card"]["kpis"]["token_requests"] == 2
+    assert status["health"]["state"] == "HEALTHY" and status["health"]["since"] == 9_990.0
     # Only this host's provider sessions count as its money.
     earnings_calls = [params for sql, params in pool.calls if "sum(micro_usd)" in sql]
     assert earnings_calls == [("m3", 10_000.0 - 86_400, ["s1"]), ("m3", 10_000.0 - 3_600, ["s1"])]
@@ -125,3 +127,4 @@ def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     assert status["current_model"] is None and status["mode"] == "LIVE"
     assert status["serving"]["1h"] == {"idle": 100.0} and status["demand"] == []
     assert status["card"]["status"]["state"] == "OFF" and status["card"]["kpis"]["tokens"] == 4_000
+    assert status["health"]["state"] == "STALE"
