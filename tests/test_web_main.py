@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,17 +14,28 @@ def _route(app, path):
     return next(route for route in app.router.routes if getattr(route, "path", None) == path)
 
 
-def test_index_serves_the_dashboard():
+def test_index_serves_the_dashboard_and_must_be_revalidated():
     app = web.create_app((), pool=None)
     response = asyncio.run(_route(app, "/").endpoint())
     assert str(response.path).endswith("dashboard.html")
+    assert response.headers["cache-control"] == "no-cache"
 
 
 def test_the_static_dir_is_mounted_for_the_page_module():
     app = web.create_app((), pool=None)
     mount = _route(app, "/static")
-    assert isinstance(mount, Mount) and isinstance(mount.app, StaticFiles)
+    assert isinstance(mount, Mount) and isinstance(mount.app, web.RevalidatedStaticFiles)
+    assert isinstance(mount.app, StaticFiles)
     assert Path(mount.app.directory) == web.STATIC_DIR
+
+
+def test_static_modules_must_be_revalidated_on_every_load():
+    # A cached hourly.js against a newer API rendered NaN% rows on the phone.
+    app = web.create_app((), pool=None)
+    path = web.STATIC_DIR / "hourly.js"
+    scope = {"type": "http", "method": "GET", "headers": []}
+    response = _route(app, "/static").app.file_response(path, os.stat(path), scope)
+    assert response.headers["cache-control"] == "no-cache"
 
 
 def test_status_returns_one_entry_per_host(monkeypatch):

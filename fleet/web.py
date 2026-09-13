@@ -20,6 +20,18 @@ from .config import Config
 from .scheduler import run_forever
 
 STATIC_DIR = Path(__file__).parent / "static"
+# The page's JS and the API ship in the same image: a browser that keeps a
+# cached module across a deploy renders the new API's data with the old code
+# (NaN% rows after the hourly-gaps change). no-cache keeps the ETag round trip
+# but makes it mandatory on every load.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(NO_CACHE)
+        return response
 
 
 def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
@@ -37,11 +49,11 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     app = FastAPI(title="darkbloom-fleet", lifespan=lifespan)
     # The page's JS lives next to the HTML it belongs with; mounting the whole
     # static dir keeps that pairing without a per-file route each time it grows.
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "dashboard.html")
+        return FileResponse(STATIC_DIR / "dashboard.html", headers=NO_CACHE)
 
     # response_model=None: the rows are plain dicts; FastAPI must not build a
     # validation model from the annotation.
