@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { actionLabel, bandHtml, errorCard, renderHost, renderHosts } from "../fleet/static/host.js";
@@ -243,6 +244,16 @@ describe("proposed-action indicator", function () {
     const html = renderHost({ host: { label: "M1", spec: "" }, mode: "OBSERVE", error: "timeout" }, "24h", "");
     expect(html).not.toContain("badge proposed");
     expect(html).not.toContain("head-flags");
+  });
+
+  it("gives the proposed badge the same size as LIVE/OBSERVE", function () {
+    const page = readFileSync(new URL("../fleet/static/dashboard.html", import.meta.url), "utf8");
+    const flags = page.match(/\.card-head \.head-flags \{[^}]+\}/)[0];
+    const proposed = page.match(/\.badge\.proposed \{[^}]+\}/)[0];
+    expect(flags).toContain("align-items: stretch");
+    expect(flags).toContain("text-align: center");
+    expect(proposed).not.toMatch(/font-size:|padding:/);
+    expect(proposed).toContain("border: 1px solid");
   });
 });
 
