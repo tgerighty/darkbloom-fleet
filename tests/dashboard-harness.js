@@ -88,7 +88,7 @@ function hostRoot(before, after) {
 }
 
 function demandNode(throwValue) {
-  const demand = { html: "", replaceChildren: function (...nodes) {
+  const demand = { html: "", tagName: "TBODY", replaceChildren: function (...nodes) {
     if (throwValue) throw throwValue;
     demand.html = nodes.map(function (n) { return n.html; }).join("");
   } };
@@ -132,9 +132,13 @@ export async function boot(opts) {
   vi.stubGlobal("document", doc);
   vi.stubGlobal("DOMParser", class {
     parseFromString(html) {
-      return { body: { childNodes: [{ html: html }] }, querySelectorAll: function (selector) {
-        return selector === "*" ? (opts.parsedNodes || []) : [];
+      const rendered = opts.nativeTableParsing && html.startsWith("<tr") ? html.replace(/<[^>]+>/g, "") : html;
+      const root = { childNodes: [{ html: rendered }], querySelectorAll: function (selector) {
+        return selector === "*" ? (opts.parsedNodes || []) : (opts.forbiddenNodes || []);
       } };
+      const match = html.match(/^<table><tbody>([\s\S]*)<\/tbody><\/table>$/);
+      const tbody = { childNodes: [{ html: match ? match[1] : "" }], querySelectorAll: root.querySelectorAll };
+      return { body: root, querySelector: function () { return tbody; } };
     }
   });
   vi.stubGlobal("setInterval", function (fn, ms) { tick = fn; tick.ms = ms; return 1; });

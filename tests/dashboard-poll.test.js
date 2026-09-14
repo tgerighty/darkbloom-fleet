@@ -15,15 +15,23 @@ afterEach(function () {
 });
 
 describe("dashboard poll and redraw", function () {
+  it("preserves demand rows when the browser parses table fragments contextually", async function () {
+    const ctx = await boot({ fetch: okFetch({ hosts: [host("M3")] }), nativeTableParsing: true });
+    expect(ctx.demand.html).toContain("<tr><td>");
+    expect(ctx.demand.html).toContain("gemma · M3");
+  });
+
   it("removes event handlers and unsafe URI attributes", async function () {
     const removed = [];
+    const forbidden = { remove: vi.fn() };
     const node = {
       attributes: [{ name: "onclick", value: "run()" }, { name: "href", value: " javascript:run()" },
-        { name: "title", value: "safe" }],
+        { name: "src", value: "java\nscript:run()" }, { name: "title", value: "safe" }],
       removeAttribute: function (name) { removed.push(name); },
     };
-    await boot({ fetch: okFetch({ hosts: [host("M3")] }), parsedNodes: [node] });
-    expect(removed).toEqual(["onclick", "href", "onclick", "href"]);
+    await boot({ fetch: okFetch({ hosts: [host("M3")] }), parsedNodes: [node], forbiddenNodes: [forbidden] });
+    expect(removed).toEqual(["onclick", "href", "src", "onclick", "href", "src"]);
+    expect(forbidden.remove).toHaveBeenCalledTimes(2);
   });
 
   it("renders both hosts, hourly rows, KEEP under OBSERVE, and restores fold scroll and window focus",
