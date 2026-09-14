@@ -187,13 +187,17 @@ advancing EMA freshness. The snapshot stores the ids as NULL (unknown) or
 an array (including empty). Inventory is observation only: no download,
 remove, or warmup.
 
+## Payout shadow
+
+Every normal collector tick checks the demand candidate against a 15-minute
+cached view of 24 hours of attributed payout per healthy warm hour for each
+exact loaded set. A set needs at least one hour of exposure. The candidate must
+remain stable for five elapsed minutes and its one-hour forecast gain must
+exceed twice the measured switch loss. The result is stored with the decision
+and shown on the host card; it is never sent to the live switch path.
+
 ## What's deferred, and why it's safe to defer for v1
 
 - **LLM-driven decisions**: out of scope; decisions use the scored formula.
-- **Payout shadow**: every normal collector tick checks the demand candidate
-  against a 15-minute cached view of 24 hours of attributed payout per healthy
-  warm hour for each exact loaded set. A set needs at least one hour of
-  exposure. The candidate must remain stable for five elapsed minutes and its
-  one-hour forecast gain must exceed twice the measured switch loss. The result
-  is stored with the decision and shown on the host card; it is never sent to
-  the live switch path.
+- **Payout-shadow live execution**: deferred until recorded forecasts beat the
+  current policy in a backtest.

@@ -322,8 +322,8 @@ WITH raw_snapshots AS (
 ), payout AS (
     SELECT snapshots.models, sum(unique_payouts.micro_usd) AS micro_usd
     FROM snapshots JOIN unique_payouts
-      ON unique_payouts.created_at >= snapshots.observed_at
-     AND unique_payouts.created_at < snapshots.next_at
+      ON unique_payouts.created_at > snapshots.observed_at
+     AND unique_payouts.created_at <= snapshots.next_at
     GROUP BY snapshots.models
 )
 SELECT exposure.models, coalesce(payout.micro_usd, 0) AS micro_usd, exposure.warm_seconds

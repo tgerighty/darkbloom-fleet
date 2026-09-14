@@ -83,6 +83,7 @@ def test_payout_rates_normalize_attributed_earnings_by_warm_time(fake_pool):
     sql, params = pool.calls[0]
     assert "ARRAY(SELECT unnest(warm_models) ORDER BY 1)" in sql
     assert "provider_hash = ANY" in sql
+    assert "created_at > snapshots.observed_at" in sql and "created_at <= snapshots.next_at" in sql
     assert params == (200.0, "h", 100.0, 200.0, 100.0, 200.0, ["hash"])
 
 
