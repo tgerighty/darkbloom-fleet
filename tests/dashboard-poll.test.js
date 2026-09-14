@@ -18,7 +18,8 @@ describe("dashboard poll and redraw", function () {
   it("removes event handlers and unsafe URI attributes", async function () {
     const removed = [];
     const node = {
-      attributes: [{ name: "onclick", value: "run()" }, { name: "href", value: " javascript:run()" }],
+      attributes: [{ name: "onclick", value: "run()" }, { name: "href", value: " javascript:run()" },
+        { name: "title", value: "safe" }],
       removeAttribute: function (name) { removed.push(name); },
     };
     await boot({ fetch: okFetch({ hosts: [host("M3")] }), parsedNodes: [node] });

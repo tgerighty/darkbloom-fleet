@@ -343,6 +343,14 @@ def _cold_boot_launch(cfg: Config, models: tuple[str, ...]) -> tuple[str, str]:
     return status, pid_file
 
 
+def _check_cold_boot_result(result: str) -> bool:
+    if not result:
+        return False
+    if result != "0":
+        raise RuntimeError(f"remote cold boot failed with exit {result}")
+    return True
+
+
 def _wait_for_cold_boot(cfg: Config, status: str, pid_file: str) -> None:
     deadline = time.monotonic() + REMOTE_POLL_SECONDS
     while time.monotonic() < deadline:
@@ -351,9 +359,7 @@ def _wait_for_cold_boot(cfg: Config, status: str, pid_file: str) -> None:
         except RuntimeError:
             time.sleep(5)
             continue
-        if result:
-            if result != "0":
-                raise RuntimeError(f"remote cold boot failed with exit {result}")
+        if _check_cold_boot_result(result):
             break
         time.sleep(5)
     else:
