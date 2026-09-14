@@ -63,7 +63,7 @@ def test_a_switch_within_the_restart_backoff_is_deferred_not_failed(monkeypatch,
     events = []
     monkeypatch.setattr(collector.db, "last_failed_switch_at", lambda pool, host: 90.0)
     monkeypatch.setattr(collector.db, "insert_decision",
-                        lambda pool, host, now, current, result, outcome: events.append(("insert", result, outcome)) or 7)
+                        lambda pool, host, now, current, result, outcome, payout: events.append(("insert", result, outcome)) or 7)
     monkeypatch.setattr(collector.db, "record_outcome", lambda pool, decision_id, outcome: events.append(("update",)))
     monkeypatch.setattr(collector, "_maybe_execute",
                         lambda cfg, pool, result, now: events.append(("execute", result.action)) or (False, None))
@@ -79,7 +79,7 @@ def test_the_decision_is_stored_before_a_live_switch_and_updated_after(monkeypat
     events = []
     monkeypatch.setattr(collector.db, "last_failed_switch_at", lambda pool, host: 0.0)
     monkeypatch.setattr(collector.db, "insert_decision",
-                        lambda pool, host, now, current, result, outcome: events.append(("insert", outcome.executed)) or 7)
+                        lambda pool, host, now, current, result, outcome, payout: events.append(("insert", outcome.executed)) or 7)
     monkeypatch.setattr(collector, "_maybe_execute", lambda cfg, pool, result, now: events.append(("execute",)) or (True, None))
     monkeypatch.setattr(collector.db, "record_outcome",
                         lambda pool, decision_id, outcome: events.append(("update", decision_id, outcome.executed)))

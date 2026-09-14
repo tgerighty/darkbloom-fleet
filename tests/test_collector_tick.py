@@ -72,6 +72,28 @@ def test_a_failed_probe_is_logged_not_stored(monkeypatch, caplog):
     assert "self-route probe unavailable" in caplog.text
 
 
+def test_payout_shadow_keeps_when_daemon_state_is_missing():
+    result = collector._shadow_payout(_cfg(), None, None, Decision(None, "stale", "WAIT"), 100.0)
+    assert result.action == "KEEP" and "daemon" in result.reason
+
+
+def test_payout_history_is_refreshed_only_every_fifteen_minutes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(collector, "_PAYOUT_CACHE", {})
+    monkeypatch.setattr(collector.attribution, "provider_hosts",
+                        lambda pool: calls.append("attribution") or {"hash": "h"})
+    monkeypatch.setattr(collector.db, "payout_rates",
+                        lambda *args: calls.append("rates") or {("a",): (1.0, 7200), ("b",): (2.0, 7200)})
+    monkeypatch.setattr(collector.db, "payout_confirmation_started_at",
+                        lambda pool, host, models, since, now: now - 300)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: (300.0, 5))
+    demand = Decision("b", "demand", "SWITCH", ("b",))
+
+    assert collector._shadow_payout(_cfg(), None, DAEMON, demand, 1000.0).action == "SWITCH"
+    assert collector._shadow_payout(_cfg(), None, DAEMON, demand, 1060.0).action == "SWITCH"
+    assert calls == ["attribution", "rates"]
+
+
 def test_decide_anchors_dwell_on_the_daemon_start(monkeypatch):
     anchors = []
     monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: anchors.append(started) or started)
@@ -254,7 +276,8 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector.db, "insert_demand_samples", record("samples"))
     monkeypatch.setattr(collector, "_ingest_earnings", record("earnings"))
     monkeypatch.setattr(collector, "_decide", lambda cfg, pool, ema, daemon, now: Decision("a", "keep", "KEEP"))
-    monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now: calls.append(("act", current)))
+    monkeypatch.setattr(collector, "_shadow_payout", lambda *args: Decision("a", "shadow", "KEEP", ("a",)))
+    monkeypatch.setattr(collector, "_record_and_act", lambda cfg, pool, result, current, now, payout: calls.append(("act", current)))
     collector.run_tick(_cfg(), None)
     assert calls == ["snapshot", "probe", "earnings", "delete_ema", "save_ema", "samples", ("act", "a")]
 

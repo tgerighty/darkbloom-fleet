@@ -11,7 +11,7 @@ import time
 
 from psycopg_pool import ConnectionPool
 
-from . import db, demand, remote, routability, scoring
+from . import attribution, db, demand, payout_decision, remote, routability, scoring
 from . import decision as decision_mod
 from .config import Config
 from .types import CapacitySample, DaemonState, Decision, Guardrails, Outcome
@@ -19,6 +19,8 @@ from .types import CapacitySample, DaemonState, Decision, Guardrails, Outcome
 log = logging.getLogger("fleet.collector")
 _SWITCH_LOCK = threading.Lock()
 _SWITCH_LEASE_SECONDS = 1800.0
+_PAYOUT_REFRESH_SECONDS = 900.0
+_PAYOUT_CACHE: dict[str, tuple[float, dict[tuple[str, ...], tuple[float, float]], float]] = {}
 
 
 def _fetch_daemon(cfg: Config, now: float) -> DaemonState | None:
@@ -232,10 +234,38 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     db.insert_demand_samples(pool, host, now, samples, scores, prices, ema)
 
     result = _decide(cfg, pool, ema, daemon, now)
-    _record_and_act(cfg, pool, result, current, now)
+    payout = _shadow_payout(cfg, pool, daemon, result, now)
+    _record_and_act(cfg, pool, result, current, now, payout)
 
 
-def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current_model: str | None, now: float) -> None:
+def _shadow_payout(cfg: Config, pool: ConnectionPool, daemon: DaemonState | None,
+                   demand_result: Decision, now: float) -> Decision:
+    """Check the demand candidate against the last day of attributed payout
+    per healthy warm hour. This is persisted for comparison, never executed."""
+    if daemon is None:
+        return Decision(None, "daemon state unavailable", "KEEP")
+    try:
+        cached = _PAYOUT_CACHE.get(cfg.host_id)
+        if cached is None or now - cached[0] >= _PAYOUT_REFRESH_SECONDS:
+            hashes = [provider_hash for provider_hash, host in attribution.provider_hosts(pool).items()
+                      if host == cfg.host_id]
+            rates = db.payout_rates(pool, cfg.host_id, now - 86400, now, hashes)
+            measured = routability.measured_switch_cost(pool, cfg.host_id)
+            switch_cost = measured[0] if measured else cfg.switch_cost_seconds
+            cached = (now, rates, switch_cost)
+            _PAYOUT_CACHE[cfg.host_id] = cached
+        _, rates, switch_cost = cached
+        proposed = demand_result.models or ((demand_result.target,) if demand_result.target else ())
+        started = db.payout_confirmation_started_at(pool, cfg.host_id, proposed, now - 300, now)
+        return payout_decision.decide(daemon.warm_models, demand_result, rates, switch_cost,
+                                      cfg.decision_horizon_seconds, now - started)
+    except Exception as error:  # noqa: BLE001 - shadow data must not break the collector
+        log.warning("payout forecast unavailable: %s", error)
+        return Decision(daemon.current_model, "payout history unavailable", "KEEP", daemon.warm_models)
+
+
+def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current_model: str | None,
+                    now: float, payout: Decision | None = None) -> None:
     """The decision is stored before any switch is dispatched, so a crash
     mid-switch still leaves a record; the outcome is written back afterwards.
     The restart-retry backoff defers rather than fails: error must stay NULL,
@@ -245,7 +275,8 @@ def _record_and_act(cfg: Config, pool: ConnectionPool, result: Decision, current
     if (result.action == "SWITCH" and cfg.live_execution
             and now - db.last_failed_switch_at(pool, cfg.host_id) < cfg.restart_backoff_seconds):
         result = Decision(result.target, f"{result.reason}; restart-retry backoff: waiting after a recent failed attempt", "BLOCKED")
-    decision_id = db.insert_decision(pool, cfg.host_id, now, current_model, result, Outcome(mode, False, None))
+    decision_id = db.insert_decision(pool, cfg.host_id, now, current_model, result,
+                                     Outcome(mode, False, None), payout)
     executed, error = _maybe_execute(cfg, pool, result, now)
     if executed or error:
         db.record_outcome(pool, decision_id, Outcome(mode, executed, error))

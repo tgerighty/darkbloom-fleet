@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS earnings (
 );
 CREATE INDEX IF NOT EXISTS earnings_host_time ON earnings (host, created_at DESC);
 ALTER TABLE earnings ADD COLUMN IF NOT EXISTS provider_hash TEXT;
+CREATE INDEX IF NOT EXISTS earnings_provider_time ON earnings (provider_hash, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS ema_state (
     host TEXT NOT NULL,
@@ -114,6 +115,9 @@ CREATE TABLE IF NOT EXISTS decisions (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS decisions_host_time ON decisions (host, observed_at DESC);
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS payout_target_models TEXT[];
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS payout_action TEXT;
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS payout_reason TEXT;
 """
 
 
@@ -279,15 +283,76 @@ def last_failed_switch_at(pool: ConnectionPool, host: str) -> float:
 
 
 def insert_decision(pool: ConnectionPool, host: str, observed_at: float, current_model: str | None,
-                     decision: Decision, outcome: Outcome) -> int:
+                     decision: Decision, outcome: Outcome, payout: Decision | None = None) -> int:
     with pool.connection() as conn:
         row = conn.execute(
             "INSERT INTO decisions (host, observed_at, current_model, target_model, action, reason, "
-            "mode, executed, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            "mode, executed, error, payout_target_models, payout_action, payout_reason) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (host, observed_at, current_model, decision.target, decision.action, decision.reason,
-             outcome.mode, outcome.executed, outcome.error),
+             outcome.mode, outcome.executed, outcome.error,
+             list(payout.models or ((payout.target,) if payout and payout.target else ())) if payout else None,
+             payout.action if payout else None, payout.reason if payout else None),
         ).fetchone()
     return int(row["id"])
+
+
+_PAYOUT_RATES_SQL = """
+WITH raw_snapshots AS (
+    SELECT observed_at, warm_models,
+           least(coalesce(lead(observed_at) OVER (ORDER BY observed_at), %s), observed_at + 600) AS next_at,
+           fresh, trust_level
+    FROM daemon_snapshots
+    WHERE host = %s AND observed_at >= %s AND observed_at <= %s
+), snapshots AS (
+    SELECT observed_at, next_at, ARRAY(SELECT unnest(warm_models) ORDER BY 1) AS models
+    FROM raw_snapshots
+    WHERE fresh AND trust_level = 'hardware' AND next_at > observed_at
+), exposure AS (
+    SELECT models, sum(next_at - observed_at) AS warm_seconds FROM snapshots
+    GROUP BY 1
+), unique_payouts AS (
+        SELECT DISTINCT ON (payout_rowid) payout_rowid, micro_usd, created_at
+        FROM earnings
+        WHERE created_at > %s AND created_at <= %s AND provider_hash = ANY(%s)
+        ORDER BY payout_rowid, host
+), payout AS (
+    SELECT snapshots.models, sum(unique_payouts.micro_usd) AS micro_usd
+    FROM snapshots JOIN unique_payouts
+      ON unique_payouts.created_at >= snapshots.observed_at
+     AND unique_payouts.created_at < snapshots.next_at
+    GROUP BY snapshots.models
+)
+SELECT exposure.models, coalesce(payout.micro_usd, 0) AS micro_usd, exposure.warm_seconds
+FROM exposure LEFT JOIN payout USING (models)
+"""
+
+
+def payout_rates(pool: ConnectionPool, host: str, since: float, now: float,
+                 hashes: list[str]) -> dict[tuple[str, ...], tuple[float, float]]:
+    if not hashes:
+        return {}
+    with pool.connection() as conn:
+        rows = conn.execute(_PAYOUT_RATES_SQL, (now, host, since, now, since, now, hashes)).fetchall()
+    return {tuple(row["models"]): (float(row["micro_usd"]) / 1_000_000 * 3600 / float(row["warm_seconds"]),
+                                   float(row["warm_seconds"]))
+            for row in rows if float(row["warm_seconds"]) > 0}
+
+
+def payout_confirmation_started_at(pool: ConnectionPool, host: str,
+                                   models: tuple[str, ...], since: float, now: float) -> float:
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT observed_at, payout_target_models FROM decisions WHERE host = %s AND observed_at >= %s "
+            "ORDER BY observed_at DESC", (host, since),
+        ).fetchall()
+    wanted = set(models)
+    started = now
+    for row in rows:
+        if set(row["payout_target_models"] or ()) != wanted:
+            break
+        started = float(row["observed_at"])
+    return started
 
 
 def record_outcome(pool: ConnectionPool, decision_id: int, outcome: Outcome) -> None:

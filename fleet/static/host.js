@@ -61,7 +61,10 @@ function decisionBlock(s) {
     " · " + esc(actionLabel(latest, s.mode)) + " · " + esc(latest.reason || "") +
     " · " + fmtAge(latest.observed_at);
   const err = latest.error ? '<div class="band-sub err">' + esc(latest.error) + "</div>" : "";
-  return '<div class="band-sub">' + line + "</div>" + err;
+  const payout = latest.payout_action ? '<div class="band-sub">payout shadow: ' +
+    esc((latest.payout_target_models || []).join(" + ") || "–") + " · " +
+    esc(latest.payout_action) + " · " + esc(latest.payout_reason || "") + "</div>" : "";
+  return '<div class="band-sub">' + line + "</div>" + payout + err;
 }
 
 export function bandHtml(s, card) {

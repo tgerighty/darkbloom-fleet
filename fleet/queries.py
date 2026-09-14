@@ -61,7 +61,8 @@ def earnings_usd(pool: ConnectionPool, since: float, now: float, hashes: list[st
 def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[Row]:
     with pool.connection() as conn:
         return conn.execute(
-            "SELECT observed_at, current_model, target_model, action, reason, mode, executed, error "
+            "SELECT observed_at, current_model, target_model, action, reason, mode, executed, error, "
+            "payout_target_models, payout_action, payout_reason "
             "FROM decisions WHERE host = %s ORDER BY observed_at DESC LIMIT %s",
             (host, limit),
         ).fetchall()
