@@ -134,7 +134,7 @@ export async function boot(opts) {
     parseFromString(html) {
       const rendered = opts.nativeTableParsing && html.startsWith("<tr") ? html.replace(/<[^>]+>/g, "") : html;
       const root = { childNodes: [{ html: rendered }], querySelectorAll: function (selector) {
-        return selector === "*" ? (opts.parsedNodes || []) : [];
+        return selector === "*" ? (opts.parsedNodes || []) : (opts.forbiddenNodes || []);
       } };
       const match = html.match(/^<table><tbody>([\s\S]*)<\/tbody><\/table>$/);
       const tbody = { childNodes: [{ html: match ? match[1] : "" }], querySelectorAll: root.querySelectorAll };

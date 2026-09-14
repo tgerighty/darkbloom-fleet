@@ -48,7 +48,7 @@ function safeNodes(html, context) {
   root.querySelectorAll("script,iframe,object,embed").forEach(function (node) { node.remove(); });
   root.querySelectorAll("*").forEach(function (node) {
     Array.from(node.attributes).forEach(function (attr) {
-      const value = attr.value.replace(/[\u0000-\u0020\u007f]/g, "").toLowerCase();
+      const value = attr.value.replaceAll(/[\u0000-\u0020\u007f]/g, "").toLowerCase();
       const unsafeUri = ["javascript:", "data:", "vbscript:"].some(function (scheme) {
         return value.startsWith(scheme);
       });
