@@ -255,6 +255,16 @@ describe("proposed-action indicator", function () {
     expect(proposed).not.toMatch(/font-size:|padding:/);
     expect(proposed).toContain("border: 1px solid");
   });
+
+  it("keeps wide demand data and the hourly panel inside the mobile viewport", function () {
+    const page = readFileSync(new URL("../fleet/static/dashboard.html", import.meta.url), "utf8");
+    expect(page).toContain('<div class="table-scroll"><table>');
+    expect(page).toMatch(/\.table-scroll \{[^}]*overflow-x: auto/);
+    expect(page).toMatch(/\.table-scroll table \{[^}]*min-width: 42rem/);
+    expect(page).toMatch(/\.card \{[^}]*min-width: 0/);
+    expect(page).toMatch(/pre\.hourly \{[^}]*box-sizing: border-box/);
+    expect(page).toMatch(/pre\.hourly \{[^}]*max-width: 100%/);
+  });
 });
 
 describe("demand merge", function () {
