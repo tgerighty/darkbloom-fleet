@@ -1,6 +1,6 @@
 import math
 
-from fleet.decision import apply_host_gates, apply_inventory_gate, decide, update_ema
+from fleet.decision import apply_host_gates, apply_inventory_gate, apply_warm_target_gate, decide, decide_pair, update_ema
 from fleet.types import DaemonState, Decision, Guardrails, LOAD_ERROR_BLOCK_SECONDS
 
 GUARDRAILS = Guardrails(relative_margin=0.25, absolute_margin=0.01, switch_cost_seconds=300.0,
@@ -124,6 +124,30 @@ def test_hardware_trust_leaves_a_switch_in_place():
     assert result == SWITCH
 
 
+def test_an_already_warm_target_does_not_cold_boot_a_multi_model_host():
+    daemon = DaemonState("a", ("a", "b"), False, 1, 0.0, True)
+    result = apply_warm_target_gate(SWITCH, daemon)
+    assert result.action == "KEEP" and result.target == "b"
+    assert "already warm" in result.reason
+
+
+def test_pair_decision_keeps_or_replaces_the_two_model_set():
+    ema = {"qwen": 2.0, "oss": 1.5, "gemma": 0.5}
+    memory = {"qwen": 23.0, "oss": 14.0, "gemma": 18.0}
+    keep = decide_pair(ema, ("oss", "qwen"), 0, NOW, False, GUARDRAILS, memory, 57.6)
+    switch = decide_pair(ema, ("oss", "gemma"), 0, NOW, False, GUARDRAILS, memory, 57.6)
+    assert keep.action == "KEEP" and keep.models == ("qwen", "oss")
+    assert switch.action == "SWITCH" and switch.target == "qwen"
+    assert switch.models == ("qwen", "oss")
+
+
+def test_pair_decision_excludes_a_combination_that_does_not_fit():
+    ema = {"large": 4.0, "medium": 2.0, "small": 1.0}
+    memory = {"large": 40.0, "medium": 30.0, "small": 10.0}
+    result = decide_pair(ema, ("medium", "small"), 0, NOW, False, GUARDRAILS, memory, 55.0)
+    assert result.models == ("large", "small")
+
+
 def test_a_recent_load_error_for_the_target_blocks():
     daemon = _daemon(trust_level="hardware", last_model_load_error_model="b",
                      last_model_load_error_message="oom", last_model_load_error_at=NOW - 5)
@@ -187,3 +211,12 @@ def test_a_known_installed_target_is_not_blocked_by_inventory():
     assert apply_inventory_gate(SWITCH, _daemon(installed_models=("a", "b"))) == SWITCH
     keep = Decision("a", "ranks first", "KEEP")
     assert apply_inventory_gate(keep, _daemon(installed_models=None)) is keep
+
+
+def test_every_model_in_a_pair_must_be_installed_and_loadable():
+    pair = Decision("b", "best pair", "SWITCH", ("b", "c"))
+    inventory = apply_inventory_gate(pair, _daemon(installed_models=("a", "b")))
+    daemon = _daemon(trust_level="hardware", last_model_load_error_model="c",
+                     last_model_load_error_at=NOW - 1)
+    assert inventory.action == "BLOCKED" and inventory.target == "c"
+    assert apply_host_gates(pair, daemon, NOW).action == "BLOCKED"

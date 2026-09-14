@@ -22,6 +22,11 @@ DEFAULT_WEIGHTS = {
     "gemma-4-26b-qat-4bit": 1.05,
     "gpt-oss-20b": 1.00,
 }
+SECRETS_DIRECTORY = Path("/run/secrets")
+_SECRET_FILENAMES = {
+    "DATABASE_PASSWORD_FILE": "darkbloom_fleet_db_password",
+    "DARKBLOOM_API_KEY_FILE": "darkbloom_fleet_api_key",
+}
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -70,20 +75,27 @@ class Config:
     ssh_config_path: str | None = None
     api_key: str | None = None  # consumer key for the self-route routability probe
     probe_self_route: bool = False  # the probe is account-wide, so only one host runs it
+    dual_model_min_gb: float = 64.0
 
 
 def _secret_file(name: str) -> str | None:
-    path = os.environ.get(name)
-    return (Path(path).read_text().strip() or None) if path else None
+    filename = os.environ.get(name)
+    if not filename:
+        return None
+    expected = _SECRET_FILENAMES[name]
+    if filename != expected:
+        raise RuntimeError(f"{name} must be {expected!r}")
+    path = SECRETS_DIRECTORY / expected
+    return path.read_text().strip() or None
 
 
 def _database_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is required (postgres connection string)")
-    password_file = os.environ.get("DATABASE_PASSWORD_FILE")
-    if password_file:
-        url = make_conninfo(url, password=Path(password_file).read_text().strip())
+    password = _secret_file("DATABASE_PASSWORD_FILE")
+    if password:
+        url = make_conninfo(url, password=password)
     return url
 
 
@@ -127,6 +139,7 @@ def load_configs() -> tuple[Config, ...]:
         "min_dwell_seconds": _float_env("FLEET_MIN_DWELL_SECONDS", 1800.0),
         "daemon_freshness_seconds": _float_env("FLEET_DAEMON_FRESHNESS_SECONDS", 90.0),
         "restart_backoff_seconds": _float_env("FLEET_RESTART_BACKOFF_SECONDS", 30.0),
+        "dual_model_min_gb": _float_env("FLEET_DUAL_MODEL_MIN_GB", 64.0, positive=True),
         "base_url": os.environ.get("DARKBLOOM_BASE_URL", "https://api.darkbloom.dev"),
         "pricing_url": os.environ.get("DARKBLOOM_PRICING_URL", "https://api.darkbloom.dev/v1/pricing"),
         "dashboard_port": int(os.environ.get("FLEET_DASHBOARD_PORT", "8080")),

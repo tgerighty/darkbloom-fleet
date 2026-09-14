@@ -15,6 +15,14 @@ def test_init_schema_runs_the_schema(fake_pool):
     assert pool.calls == [(db.SCHEMA_SQL, None)]
 
 
+def test_switch_lease_is_acquired_and_released_by_owner(fake_pool):
+    pool = fake_pool([{"owner": "h:1"}])
+    assert db.acquire_switch_lease(pool, "h:1", 10.0, 1800.0) is True
+    db.release_switch_lease(pool, "h:1")
+    assert pool.calls[0][1] == ("h:1", 1810.0, 10.0)
+    assert pool.calls[1][1] == ("h:1",)
+
+
 def test_bulk_inserts_skip_empty_input(fake_pool):
     pool = fake_pool()
     db.insert_demand_samples(pool, "h", 1.0, {}, {}, {}, {})

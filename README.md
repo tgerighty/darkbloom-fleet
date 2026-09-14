@@ -102,23 +102,18 @@ happened on the real host on 2026-09-11: the switcher wanted
 `gemma-4-26b-qat-4bit` for 8 consecutive ticks, all 8 blocked on
 "provider is serving a request", while idle gaps came and went unseen.
 
-When `decision.decide()` returns `SWITCH_WHEN_IDLE` (challenger clears
-margin and dwell, blocked only on `inference_active`), the collector deploys
-and launches `fleet/remote_assets/fast_switch_watcher.py` on the remote host
-via SSH (`fleet/remote.py:launch_fast_switch_watcher`). That script polls
-locally every 1s for the rest of the cycle, re-reading its target from a
-small JSON state file the collector rewrites over SSH each tick (it can't
-call back into fleet's own process once launched) - so it self-corrects if
-the recommendation changes mid-wait - and executes the switch the instant
-`inference_active` goes false, using the same bootstrap-race
-retry-after-25s and 5x3s post-switch verification as `remote.execute_switch`.
-
-It's self-locking via a PID file (`/tmp/darkbloom-fast-switch.lock`, checked
-with `os.kill(pid, 0)` - the target host is macOS, which has no `flock`
-CLI), so launching it again while one is already running is a cheap no-op:
-the new process sees the lock held and exits immediately. Like every other
-real action, it's gated by `FLEET_LIVE_EXECUTION`: in OBSERVE mode the
-collector only logs what it would launch.
+When `decision.decide()` returns `SWITCH_WHEN_IDLE`, the collector waits for
+a later fresh idle tick. A live switch stops the provider for five minutes,
+starts the selected set, warms every model locally, checks the exact warm set,
+then submits a self-routed Darkbloom API completion for each model. The switch
+is recorded as failed if either check fails.
+Like every other real action, this is gated by `FLEET_LIVE_EXECUTION`.
+The self-routed API view is account-wide, so the local inference and daemon
+checks prove the selected host; the API completion proves account routing.
+Hosts reporting at least `FLEET_DUAL_MODEL_MIN_GB` RAM rank the combined EMA
+score of two-model sets and launch the best pair, such as Qwen+OSS or
+OSS+Gemma. Smaller hosts rank one model. An already-warm winning set stays up.
+One process-wide lock prevents the two hosts from cold-booting together.
 
 ## Deferred to a follow-up (explicitly out of v1 scope)
 

@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS demand_samples (
 CREATE INDEX IF NOT EXISTS demand_samples_host_model_time
     ON demand_samples (host, model, observed_at DESC);
 
+CREATE TABLE IF NOT EXISTS switch_lease (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    owner TEXT NOT NULL,
+    expires_at DOUBLE PRECISION NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS daemon_snapshots (
     id BIGSERIAL PRIMARY KEY,
     host TEXT NOT NULL,
@@ -147,6 +153,22 @@ def update_snapshot_installed_models(
             "UPDATE daemon_snapshots SET installed_models = %s WHERE host = %s AND observed_at = %s",
             (list(installed), host, observed_at),
         )
+
+
+def acquire_switch_lease(pool: ConnectionPool, owner: str, now: float, ttl_seconds: float) -> bool:
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO switch_lease (singleton, owner, expires_at) VALUES (true, %s, %s) "
+            "ON CONFLICT (singleton) DO UPDATE SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at "
+            "WHERE switch_lease.expires_at < %s RETURNING owner",
+            (owner, now + ttl_seconds, now),
+        ).fetchone()
+    return bool(row and row["owner"] == owner)
+
+
+def release_switch_lease(pool: ConnectionPool, owner: str) -> None:
+    with pool.connection() as conn:
+        conn.execute("DELETE FROM switch_lease WHERE owner = %s", (owner,))
 
 
 def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, daemon: DaemonState) -> None:

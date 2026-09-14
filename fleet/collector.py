@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import threading
 import time
 
 from psycopg_pool import ConnectionPool
@@ -16,6 +17,8 @@ from .config import Config
 from .types import CapacitySample, DaemonState, Decision, Guardrails, Outcome
 
 log = logging.getLogger("fleet.collector")
+_SWITCH_LOCK = threading.Lock()
+_SWITCH_LEASE_SECONDS = 1800.0
 
 
 def _fetch_daemon(cfg: Config, now: float) -> DaemonState | None:
@@ -32,6 +35,14 @@ def _fetch_installed(cfg: Config) -> tuple[str, ...] | None:
         return remote.fetch_installed_models(cfg)
     except Exception as error:  # noqa: BLE001 - must not stall or fail daemon state
         log.warning("installed-model inventory unknown: %s", error)
+        return None
+
+
+def _fetch_model_memory(cfg: Config) -> dict[str, float] | None:
+    try:
+        return remote.fetch_model_memory(cfg)
+    except Exception as error:  # noqa: BLE001
+        log.warning("installed-model memory inventory unknown: %s", error)
         return None
 
 
@@ -101,7 +112,17 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
         decision_horizon_seconds=cfg.decision_horizon_seconds,
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
-    result = decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    if (daemon.total_memory_gb or 0) >= cfg.dual_model_min_gb:
+        memory = _fetch_model_memory(cfg)
+        if memory is None:
+            return Decision(daemon.current_model, "model memory inventory unavailable", "WAIT")
+        result = decision_mod.decide_pair(
+            ema, daemon.warm_models, anchor, now, daemon.inference_active,
+            guardrails, memory, (daemon.total_memory_gb or 0) * 0.9,
+        )
+    else:
+        result = decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    result = decision_mod.apply_warm_target_gate(result, daemon)
     result = decision_mod.apply_host_gates(result, daemon, now)
     return decision_mod.apply_inventory_gate(result, daemon)
 
@@ -113,11 +134,24 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: f
     fresh daemon read, then re-checks on-disk inventory before the start."""
     if decision.action != "SWITCH" or not cfg.live_execution:
         return False, None
+    with _SWITCH_LOCK:
+        lease_owner = f"{cfg.host_id}:{time.time_ns()}"
+        if pool is not None and not db.acquire_switch_lease(pool, lease_owner, time.time(), _SWITCH_LEASE_SECONDS):
+            return False, "aborted: another host cold boot is in progress"
+        try:
+            return _execute_with_lease(cfg, decision)
+        finally:
+            if pool is not None:
+                db.release_switch_lease(pool, lease_owner)
+
+
+def _execute_with_lease(cfg: Config, decision: Decision) -> tuple[bool, str | None]:
     fresh_now = time.time()
     fresh_daemon = _fetch_daemon(cfg, fresh_now)
     if not fresh_daemon or not fresh_daemon.fresh or fresh_daemon.inference_active:
         return False, "aborted: provider is not confirmed fresh and idle immediately before the switch"
-    gated = decision_mod.apply_host_gates(decision, fresh_daemon, fresh_now)
+    gated = decision_mod.apply_warm_target_gate(decision, fresh_daemon)
+    gated = decision_mod.apply_host_gates(gated, fresh_daemon, fresh_now)
     if gated.action != "SWITCH":
         return False, "aborted: host safety gate failed on the fresh daemon read"
     installed = _fetch_installed(cfg)
@@ -126,7 +160,7 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: f
     if gated.action != "SWITCH" or gated.target is None:
         return False, "aborted: inventory gate failed on the fresh read"
     try:
-        remote.execute_switch(cfg, gated.target)
+        remote.execute_switch(cfg, gated.models or (gated.target,))
     except Exception as error:  # noqa: BLE001
         log.warning("switch execution failed: %s", error)
         return False, "switch failed"
@@ -134,26 +168,15 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: f
 
 
 def _maybe_launch_fast_poll(cfg: Config, decision: Decision) -> None:
-    """A SWITCH_WHEN_IDLE decision means the challenger already clears every
-    gate except idle. Waiting out the rest of this ~60s poll cycle risks
-    missing a narrow idle gap that opens and closes between ticks - exactly
-    what missed 8 consecutive ticks in a row on the real host (see README) -
-    so launch the self-locking 1s-poll watcher on the remote host instead;
-    it re-checks the live recommendation every second and switches the
-    instant a gap opens. Any other decision clears the watcher's target, so a
-    watcher still running from an earlier tick cannot act on a stale one.
-    Observe mode never launches or executes anything, but still clears a
-    target left behind by an earlier live tick."""
+    """Clear the old quick-switch watcher. A checked cold boot needs the
+    collector-held consumer key, so the next fresh idle tick executes it."""
     try:
         if not cfg.live_execution:
             if decision.action == "SWITCH_WHEN_IDLE":
                 log.info("observe mode: would launch fast-poll watcher for target %s", decision.target)
             remote.remove_fast_switch_target(cfg)
             return
-        if decision.action == "SWITCH_WHEN_IDLE":
-            remote.launch_fast_switch_watcher(cfg, decision.target, max_seconds=max(5.0, cfg.poll_interval_seconds - 5))
-        else:
-            remote.clear_fast_switch_target(cfg)
+        remote.clear_fast_switch_target(cfg)
     except Exception as error:  # noqa: BLE001 - one bad tick must not kill the loop
         log.warning("fast-poll watcher control failed: %s", error)
 

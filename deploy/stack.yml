@@ -55,10 +55,10 @@ services:
     image: zillon/darkbloom-fleet:${IMAGE_VERSION:-latest}
     environment:
       DATABASE_URL: postgresql://darkbloom_fleet@postgres:5432/darkbloom_fleet
-      DATABASE_PASSWORD_FILE: /run/secrets/darkbloom_fleet_db_password
+      DATABASE_PASSWORD_FILE: darkbloom_fleet_db_password
       DARKBLOOM_SSH_CONFIG: /run/secrets/darkbloom_fleet_ssh_config
       # Consumer key for the self-route routability probe (read-only listing).
-      DARKBLOOM_API_KEY_FILE: /run/secrets/darkbloom_fleet_api_key
+      DARKBLOOM_API_KEY_FILE: darkbloom_fleet_api_key
       DARKBLOOM_HOST_1_SSH_TARGET: m3-48-1
       # The _ID pins the database identity; _LABEL stays free to edit.
       DARKBLOOM_HOST_1_ID: m3-48-1
@@ -71,7 +71,7 @@ services:
       # Qwen3.5-9B is deliberately absent: loading it breaks the provider's
       # signed status payload (d-inference #825 / #870) and the node is never routed.
       DARKBLOOM_HOST_2_MODELS: gpt-oss-20b,gemma-4-26b-qat-4bit,qwen3-vl-30b-a3b-instruct,nvidia-nemotron-3.5-lightning,qwen3.5-35b-a3b,qwen3.6-35b-a3b-vl-mtp-mxfp8,gemma-4-26b,gemma-4-26b-8bit
-      # Observe only: the fleet records recommendations and never switches.
+      # Observe only until the cold-boot rollout is explicitly activated.
       FLEET_LIVE_EXECUTION: "false"
       POLL_INTERVAL_SECONDS: "60"
       PYTHONDONTWRITEBYTECODE: "1"

@@ -73,6 +73,7 @@ class Decision:
     target: str | None
     reason: str
     action: str  # KEEP | SWITCH | SWITCH_WHEN_IDLE | WOULD_SWITCH | WAIT | BLOCKED
+    models: tuple[str, ...] = ()  # exact launch set; empty means target only
 
 
 @dataclass(frozen=True)

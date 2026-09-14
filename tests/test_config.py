@@ -13,9 +13,10 @@ def base_env(monkeypatch):
 
 
 def test_secret_files_reach_the_config(base_env, tmp_path):
-    password = tmp_path / "db_password"
+    password = tmp_path / "darkbloom_fleet_db_password"
     password.write_text("s3cret\n")
-    base_env.setenv("DATABASE_PASSWORD_FILE", str(password))
+    base_env.setattr(config, "SECRETS_DIRECTORY", tmp_path)
+    base_env.setenv("DATABASE_PASSWORD_FILE", password.name)
     base_env.setenv("DARKBLOOM_SSH_CONFIG", "/run/secrets/ssh_config")
 
     (cfg,) = config.load_configs()
@@ -80,13 +81,20 @@ def test_at_least_one_host_is_required(base_env):
 
 
 def test_the_consumer_key_is_shared_but_only_the_first_host_probes(base_env, tmp_path):
-    key = tmp_path / "api_key"
+    key = tmp_path / "darkbloom_fleet_api_key"
     key.write_text("k-123\n")
-    base_env.setenv("DARKBLOOM_API_KEY_FILE", str(key))
+    base_env.setattr(config, "SECRETS_DIRECTORY", tmp_path)
+    base_env.setenv("DARKBLOOM_API_KEY_FILE", key.name)
     base_env.setenv("DARKBLOOM_HOST_2_SSH_TARGET", "m1")
     first, second = config.load_configs()
     assert first.api_key == second.api_key == "k-123"
     assert first.probe_self_route is True and second.probe_self_route is False
+
+
+def test_secret_filename_rejects_paths(base_env):
+    base_env.setenv("DATABASE_PASSWORD_FILE", "../password")
+    with pytest.raises(RuntimeError, match="darkbloom_fleet_db_password"):
+        config.load_configs()
 
 
 def test_per_host_live_execution_overrides_the_default(base_env):

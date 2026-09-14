@@ -2,7 +2,6 @@
 other tests swap subprocess.run or _run_ssh, so none of this needs a network."""
 import dataclasses
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -25,6 +24,7 @@ def _cfg(live_execution: bool) -> Config:
         absolute_margin=0.01, switch_cost_seconds=300.0, decision_horizon_seconds=3600.0,
         min_dwell_seconds=1800.0, daemon_freshness_seconds=90.0, restart_backoff_seconds=30.0,
         live_execution=live_execution, base_url="https://x", pricing_url="https://x", dashboard_port=8080,
+        api_key=__name__,
     )
 
 
@@ -157,21 +157,103 @@ def test_empty_provider_hash_is_stored_as_null(monkeypatch):
 
 
 def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
-    commands = _capture(monkeypatch)
+    commands = _capture(monkeypatch, "0")
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
     remote.execute_switch(_cfg(True), "gpt-oss-20b")
     remote.clear_fast_switch_target(_cfg(True))
-    assert commands == [
-        f"{remote.DARKBLOOM_BIN} start --model gpt-oss-20b --idle-timeout 0",
-        f"rm -f {remote.FAST_SWITCH_STATE_PATH}",
-    ]
+    assert len(commands) == 3
+    assert "$HOME/.darkbloom/bin/darkbloom stop" in commands[0]
+    assert "sleep 300" in commands[0]
+    assert "nohup /bin/sh" in commands[0] and "fleet-cold-boot.status" in commands[1]
+    assert "$HOME/.darkbloom/bin/darkbloom start --model gpt-oss-20b --idle-timeout 0 --local-endpoint" in commands[0]
+    assert 'models = ["gpt-oss-20b"]' in commands[0]
+    assert commands[2] == f"rm -f {remote.FAST_SWITCH_STATE_PATH}"
 
 
-def test_live_switch_uses_the_watcher_binary_path_and_quotes_the_model(monkeypatch):
-    commands = _capture(monkeypatch)
+def test_live_switch_requires_a_consumer_key_for_the_api_check(monkeypatch):
+    _capture(monkeypatch)
+    with pytest.raises(RuntimeError, match="consumer API key"):
+        remote.execute_switch(dataclasses.replace(_cfg(True), api_key=None), "a")
+
+
+def test_api_warmup_is_self_routed(monkeypatch):
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"{}"
+
+    def open_request(request, timeout):
+        seen.update(url=request.full_url, headers=dict(request.header_items()), body=request.data, timeout=timeout)
+        return Response()
+
+    class Opener:
+        open = staticmethod(open_request)
+
+    monkeypatch.setattr(remote.urllib.request, "build_opener",
+                        lambda handler: seen.setdefault("handler", handler) and Opener())
+    remote._submit_api_warmup(_cfg(True), "a")
+    assert seen["url"] == "https://x/v1/chat/completions"
+    assert seen["headers"]["X-darkbloom-route"] == "self"
+    assert seen["headers"]["Authorization"] == "Bearer " + __name__
+    assert b'"model": "a"' in seen["body"]
+    assert isinstance(seen["handler"], remote._NoRedirect)
+
+
+def test_api_warmup_retries_transient_failure(monkeypatch):
+    attempts = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"{}"
+
+    class Opener:
+        def open(self, request, timeout):
+            attempts.append(request)
+            if len(attempts) == 1:
+                raise OSError("not ready")
+            return Response()
+
+    monkeypatch.setattr(remote.urllib.request, "build_opener", lambda handler: Opener())
+    monkeypatch.setattr(remote.time, "sleep", lambda seconds: None)
+    remote._submit_api_warmup(_cfg(True), "a")
+    assert len(attempts) == 2
+
+
+def test_api_warmup_refuses_a_non_https_base_url():
+    with pytest.raises(RuntimeError, match="non-HTTPS"):
+        remote._submit_api_warmup(dataclasses.replace(_cfg(True), base_url="http://x"), "a")
+
+
+def test_live_switch_quotes_the_model(monkeypatch):
+    commands = _capture(monkeypatch, "0")
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
     remote.execute_switch(_cfg(True), "gpt oss; rm")
-    assert Path(remote.DARKBLOOM_BIN).expanduser() == Path.home() / ".darkbloom" / "bin" / "darkbloom"
-    assert commands == [f"{remote.DARKBLOOM_BIN} start --model 'gpt oss; rm' --idle-timeout 0"]
+    assert "$HOME/.darkbloom/bin/darkbloom start --model 'gpt oss; rm'" in commands[0]
+    assert 'models = ["gpt oss; rm"]' in commands[0]
     assert "models list" not in remote._STATE_COMMAND
+
+
+def test_live_switch_starts_and_checks_each_requested_model(monkeypatch):
+    commands = _capture(monkeypatch, "0")
+    checked = []
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: checked.append(model))
+    remote.execute_switch(_cfg(True), ("qwen", "oss"))
+    assert "start --model qwen --model oss" in commands[0]
+    assert 'models = ["qwen", "oss"]' in commands[0]
+    assert checked == ["qwen", "oss"]
 
 
 def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):
@@ -200,6 +282,11 @@ def test_inventory_fetch_is_a_separate_all_json_list_command(monkeypatch):
     assert commands == [remote._INVENTORY_COMMAND]
     assert remote._INVENTORY_COMMAND == f"{remote.DARKBLOOM_BIN} models list --all --json"
     assert "models list" not in remote._STATE_COMMAND
+
+
+def test_model_memory_uses_cli_estimates(monkeypatch):
+    _capture(monkeypatch, '{"models": [{"id": "a", "estimated_memory_gb": 13.5}]}')
+    assert remote.fetch_model_memory(_cfg(False)) == {"a": 13.5}
 
 
 def test_inventory_fetch_rejects_malformed_json(monkeypatch):
