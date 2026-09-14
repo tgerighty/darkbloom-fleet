@@ -43,13 +43,15 @@ const SWITCH = {
 
 describe("high-level band and chips", function () {
   it("shows current model, idle, would-switch, and the decision error", function () {
-    const html = bandHtml(host({ recent_decisions: [SWITCH] }), host().card);
+    const html = bandHtml(host({ recent_decisions: [{ ...SWITCH, payout_target_models: ["qwen", "oss"],
+      payout_action: "KEEP", payout_reason: "insufficient payout evidence" }] }), host().card);
     expect(html).toContain("gemma");
     expect(html).toContain("idle");
     expect(html).toContain("would switch");
     expect(html).toContain("ranks first");
     expect(html).toContain("ssh fail");
     expect(html).toContain('class="band-sub err"');
+    expect(html).toContain("payout shadow: qwen + oss · KEEP · insufficient payout evidence");
     expect(html).toContain("TRUSTED — no request in 10 min");
     expect(html).not.toContain("priority:");
     expect(html).not.toContain("no traffic yet");
@@ -61,6 +63,11 @@ describe("high-level band and chips", function () {
     expect(actionLabel({ ...SWITCH, executed: true }, "OBSERVE")).toBe("SWITCH");
     expect(actionLabel(SWITCH, "LIVE")).toBe("SWITCH");
     expect(actionLabel({ ...SWITCH, action: "KEEP" }, "OBSERVE")).toBe("KEEP");
+  });
+
+  it("renders an incomplete payout shadow safely", function () {
+    const html = bandHtml(host({ recent_decisions: [{ ...SWITCH, payout_action: "KEEP" }] }), host().card);
+    expect(html).toContain("payout shadow: – · KEEP · ");
   });
 
   it("marks the current loaded chip while idle and serving", function () {

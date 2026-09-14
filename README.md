@@ -59,6 +59,12 @@ happened and why.
 - **Several Macs, one service.** Each `DARKBLOOM_HOST_<N>_*` block is a
   managed Mac with its own model list. LLM-driven decision-making (as opposed
   to today's scored heuristic) remains follow-on work.
+- **Payout-first shadow model.** The existing collector also compares each
+  demand-driven candidate with the last 24 hours of attributed earnings per
+  healthy warm hour for the exact loaded set. It requires one hour of evidence
+  per set, five elapsed minutes of confirmation, and a forecast gain above
+  twice the measured cold-boot loss. The dashboard shows this recommendation,
+  but it cannot switch a host.
 
 ## Resolved for v1 (see CONFIG.md for details)
 
@@ -113,6 +119,8 @@ A database lease prevents the two hosts from cold-booting together.
 ## Deferred to a follow-up (explicitly out of v1 scope)
 
 - LLM-driven decision-making (today's heuristic is the scored formula above).
+- Promotion of the payout-first shadow recommendation into live execution,
+  after its recorded forecasts beat the current policy in a backtest.
 
 ## Running locally
 

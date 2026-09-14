@@ -70,7 +70,7 @@ def _stub_tick(monkeypatch, stored, *, installed, samples=None, prices=None, ema
         stored["loaded"] = True
         return ema_prev, 50.0
 
-    def act(cfg, pool, result, current, now):
+    def act(cfg, pool, result, current, now, payout=None):
         stored["act"] = (current, result)
 
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
