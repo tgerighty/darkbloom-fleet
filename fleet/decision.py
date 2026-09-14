@@ -1,9 +1,8 @@
 """Switch decision: EMA-smoothed scores + the source project's margins/dwell.
 
 A SWITCH_WHEN_IDLE result means the challenger already clears every gate
-except idle - collector.py launches a fast 1s-poll watcher on the remote
-host for exactly this case instead of waiting out the rest of the ~60s poll
-cycle (see README for the incident that motivated it).
+except idle. The collector waits for a fresh idle tick before it starts the
+checked cold boot.
 
 Forked from darkbloom-manager's warm_model_manager.py (score formula, switch-
 cost discount, relative/absolute margins) with the "N consecutive passing
@@ -16,6 +15,7 @@ switches: 48 -> 3-16). See CONFIG.md for the full numbers. This module ports
 from __future__ import annotations
 
 import math
+from itertools import combinations
 
 from .types import LOAD_ERROR_BLOCK_SECONDS, DaemonState, Decision, Guardrails
 
@@ -101,6 +101,56 @@ def decide(
     )
 
 
+def _single_decision(ema: dict[str, float], daemon: DaemonState, last_switch_at: float,
+                     now: float, guardrails: Guardrails) -> Decision:
+    current = next((model for model in daemon.warm_models if model in ema), None)
+    return decide(ema, current, last_switch_at, now, daemon.inference_active, guardrails)
+
+
+def _feasible_pairs(ema: dict[str, float], model_memory_gb: dict[str, float],
+                    memory_limit_gb: float) -> list[tuple[str, str]]:
+    return [pair for pair in combinations(ema, 2)
+            if all(model in model_memory_gb for model in pair)
+            and sum(model_memory_gb[model] for model in pair) <= memory_limit_gb]
+
+
+def _finish_pair(pair: tuple[str, str], current: tuple[str, ...], ema: dict[str, float],
+                 daemon: DaemonState, last_switch_at: float, now: float,
+                 guardrails: Guardrails) -> Decision:
+    current_score = sum(ema[model] for model in current)
+    discount = max(0.0, (guardrails.decision_horizon_seconds - guardrails.switch_cost_seconds)
+                   / guardrails.decision_horizon_seconds)
+    challenger_score = sum(ema[model] for model in pair) * discount
+    need = max(current_score * (1 + guardrails.relative_margin), current_score + guardrails.absolute_margin)
+    if challenger_score < need:
+        target = current[0] if current else pair[0]
+        return Decision(target, f"best pair below margin ({challenger_score:.3f} vs {current_score:.3f}; need >= {need:.3f})", "KEEP", current)
+    if now - last_switch_at < guardrails.min_dwell_seconds:
+        return Decision(current[0] if current else pair[0], "best pair clears margin but minimum dwell remains", "KEEP", current)
+    target = next(model for model in pair if model not in daemon.warm_models)
+    action = "SWITCH_WHEN_IDLE" if daemon.inference_active else "SWITCH"
+    return Decision(target, f"best pair clears margin: {', '.join(pair)}", action, pair)
+
+
+def decide_pair(ema: dict[str, float], daemon: DaemonState, last_switch_at: float,
+                now: float, guardrails: Guardrails,
+                model_memory_gb: dict[str, float]) -> Decision:
+    """Rank a two-model resident set by its combined smoothed earnings score."""
+    if len(ema) < 2:
+        return _single_decision(ema, daemon, last_switch_at, now, guardrails)
+    warm_models = daemon.warm_models
+    memory_limit_gb = (daemon.total_memory_gb or 0) * 0.9
+    pairs = _feasible_pairs(ema, model_memory_gb, memory_limit_gb)
+    if not pairs:
+        return _single_decision(ema, daemon, last_switch_at, now, guardrails)
+    pair = max(pairs, key=lambda models: sum(ema[model] for model in models))
+    pair = tuple(sorted(pair, key=ema.get, reverse=True))
+    current = tuple(model for model in warm_models if model in ema)[:2]
+    if set(pair).issubset(warm_models):
+        return Decision(pair[0], f"best model pair is already warm: {', '.join(pair)}", "KEEP", pair)
+    return _finish_pair(pair, current, ema, daemon, last_switch_at, now, guardrails)
+
+
 def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decision | None:
     """BLOCKED when the target matches a load error with no valid timestamp, a
     future timestamp, or one at most LOAD_ERROR_BLOCK_SECONDS in the past.
@@ -125,6 +175,14 @@ def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decis
     return None
 
 
+def _first_load_error(result: Decision, daemon: DaemonState, now: float) -> Decision | None:
+    for model in result.models or ((result.target,) if result.target else ()):
+        blocked = _load_error_gate(Decision(model, result.reason, result.action), daemon, now)
+        if blocked:
+            return blocked
+    return None
+
+
 def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decision:
     """Thermal, trust, and load-error gates. OBSERVE and LIVE share this path.
     Missing trust is not hardware: a switch-like decision becomes KEEP."""
@@ -141,8 +199,15 @@ def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decis
             f"{result.reason}; trust is {label}, not hardware; no restart during attestation",
             "KEEP",
         )
-    blocked = _load_error_gate(result, daemon, now)
-    return blocked if blocked is not None else result
+    return _first_load_error(result, daemon, now) or result
+
+
+def apply_warm_target_gate(result: Decision, daemon: DaemonState) -> Decision:
+    """Do not cold-boot a host when it already serves the selected model."""
+    wanted = result.models or ((result.target,) if result.target else ())
+    if wanted and result.action in _SWITCH_ACTIONS and set(wanted).issubset(daemon.warm_models):
+        return Decision(result.target, f"{result.reason}; target is already warm on this host", "KEEP")
+    return result
 
 
 def apply_inventory_gate(result: Decision, daemon: DaemonState) -> Decision:
@@ -157,10 +222,12 @@ def apply_inventory_gate(result: Decision, daemon: DaemonState) -> Decision:
             f"{result.reason}; inventory unknown: keeping the current model",
             "KEEP",
         )
-    if result.target is not None and result.target not in installed:
+    missing = next((model for model in result.models or ((result.target,) if result.target else ())
+                    if model not in installed), None)
+    if missing is not None:
         return Decision(
-            result.target,
-            f"{result.reason}; blocked: {result.target} is not installed",
+            missing,
+            f"{result.reason}; blocked: {missing} is not installed",
             "BLOCKED",
         )
     return result

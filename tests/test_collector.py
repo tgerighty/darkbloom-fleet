@@ -28,13 +28,13 @@ def remote_calls(monkeypatch):
     return calls
 
 
-def test_launches_the_watcher_when_busy_and_a_different_target_clears_margin(remote_calls):
+def test_busy_switch_waits_for_a_full_checked_cold_boot_on_a_later_tick(remote_calls):
     decision = Decision("gemma-4-26b-qat-4bit", "clears margin but waiting for idle", "SWITCH_WHEN_IDLE")
     collector._maybe_launch_fast_poll(_cfg(live_execution=True), decision)
-    assert remote_calls == [("launch", "gemma-4-26b-qat-4bit", 55.0)]
+    assert remote_calls == [("clear",)]
 
 
-def test_every_other_live_decision_clears_the_watcher_target(remote_calls):
+def test_every_live_decision_clears_the_watcher_target(remote_calls):
     for action in ("KEEP", "SWITCH", "WAIT"):
         collector._maybe_launch_fast_poll(_cfg(live_execution=True), Decision("b", "reason", action))
     assert remote_calls == [("clear",), ("clear",), ("clear",)]

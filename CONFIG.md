@@ -67,14 +67,14 @@ Shared by every host:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATABASE_PASSWORD_FILE` | unset | File holding the Postgres password (a Swarm secret), merged into `DATABASE_URL`. |
+| `DATABASE_PASSWORD_FILE` | unset | Set to `darkbloom_fleet_db_password` to load that Swarm secret into `DATABASE_URL`. |
 | `DARKBLOOM_SSH_CONFIG` | unset | SSH config passed to every `ssh` call with `-F` (a Swarm secret on the cluster). |
-| `DARKBLOOM_API_KEY_FILE` | unset | File holding a Darkbloom consumer API key (a Swarm secret). When set, host 1's tick probes `GET /v1/models` with `X-Darkbloom-Route: self` once a minute and records which of our models the coordinator will route to. Empty results are recorded too: they are the post-restart penalty box. Unset disables the probe. |
+| `DARKBLOOM_API_KEY_FILE` | unset | Set to `darkbloom_fleet_api_key` to load the shared API key. It authenticates the self-routed model listing and live chat-completion warm-ups. |
 | `FLEET_BIND_HOST` | `127.0.0.1` | Address the dashboard binds to. Containers set `0.0.0.0` so Docker can reach it. |
 | `DARKBLOOM_BASE_URL` | `https://api.darkbloom.dev` | Public demand-capacity API base. |
 | `DARKBLOOM_PRICING_URL` | `https://api.darkbloom.dev/v1/pricing` | Public output-token pricing endpoint. |
 | `POLL_INTERVAL_SECONDS` | `60` | Ingestion + decision cadence. |
-| `FLEET_LIVE_EXECUTION` | `false` | **The only switch that enables real actions.** See "Safety default" below. |
+| `FLEET_LIVE_EXECUTION` | `false` | **The only switch that enables real actions.** See "Safety default" below. Live switches use a five-minute cold boot and require local and self-routed API checks. |
 | `FLEET_EMA_TAU_MINUTES` | `20` | EMA time constant for score smoothing. |
 | `FLEET_RELATIVE_MARGIN` | `0.25` | Challenger must clear `current * (1 + margin)`. |
 | `FLEET_ABSOLUTE_MARGIN` | `0.01` | Challenger must also clear `current + margin`. |
@@ -83,6 +83,7 @@ Shared by every host:
 | `FLEET_MIN_DWELL_SECONDS` | `1800` | Minimum time before another switch is even considered. |
 | `FLEET_DAEMON_FRESHNESS_SECONDS` | `90` | A daemon-state read older than this is treated as stale, not authoritative. |
 | `FLEET_RESTART_BACKOFF_SECONDS` | `30` | Cooldown after a failed switch attempt before retrying. |
+| `FLEET_DUAL_MODEL_MIN_GB` | `64` | Hosts at or above this reported RAM rank and launch two-model combinations. |
 | `FLEET_DASHBOARD_PORT` | `8080` | Port the dashboard/API listens on. |
 
 ## Per-host card data (no new env vars)
@@ -163,21 +164,16 @@ earnings-ledger data (2026-09-09 05:54 -> 2026-09-11 12:22 local):
   same failure, while a 20-30 second wait lets the old process finish dying
   first.
 
-## Fast idle-gap watcher (no new env var)
+## Idle-gated cold boots
 
-Idle-gating (above) can itself starve a switch that never sees an idle
-instant at tick time even though idle gaps are opening and closing between
-ticks - the real host missed 8 consecutive ~60s ticks in a row on 2026-09-11
-this way. When a tick's decision is `SWITCH_WHEN_IDLE` (clears margin and
-dwell, blocked only on `inference_active`) and `FLEET_LIVE_EXECUTION=true`,
-the collector launches a 1s-poll watcher on the remote host for the rest of
-the cycle instead of waiting for the next tick - see README's "Fast idle-gap
-watcher" for how it works and `fleet/remote_assets/fast_switch_watcher.py`
-for the implementation. Its poll window is derived from the existing
-`POLL_INTERVAL_SECONDS` (`poll_interval_seconds - 5`, floored at 5s), not a
-separate setting - one less knob, and it stays correct if the cadence
-changes. In OBSERVE mode this is also a no-op: the collector only logs what
-it would launch.
+The collector rechecks fresh idle state immediately before each live switch.
+It then stops the provider for five minutes, starts the selected one- or
+two-model set with the local endpoint enabled, and requires a completed local
+inference plus a self-routed Darkbloom API inference for each model. A missing
+consumer key or either failed check records a failed switch. Busy providers
+wait for a later collector tick. One manager lock serializes host cold boots.
+The local check identifies the selected host. The self-routed API check is
+account-wide and confirms that an owned provider can receive the model.
 
 ## Local model inventory
 

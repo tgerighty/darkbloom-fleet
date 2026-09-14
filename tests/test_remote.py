@@ -2,7 +2,6 @@
 other tests swap subprocess.run or _run_ssh, so none of this needs a network."""
 import dataclasses
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -25,6 +24,7 @@ def _cfg(live_execution: bool) -> Config:
         absolute_margin=0.01, switch_cost_seconds=300.0, decision_horizon_seconds=3600.0,
         min_dwell_seconds=1800.0, daemon_freshness_seconds=90.0, restart_backoff_seconds=30.0,
         live_execution=live_execution, base_url="https://x", pricing_url="https://x", dashboard_port=8080,
+        api_key=__name__,
     )
 
 
@@ -157,21 +157,126 @@ def test_empty_provider_hash_is_stored_as_null(monkeypatch):
 
 
 def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
-    commands = _capture(monkeypatch)
+    commands = _capture(monkeypatch, "0")
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
     remote.execute_switch(_cfg(True), "gpt-oss-20b")
     remote.clear_fast_switch_target(_cfg(True))
-    assert commands == [
-        f"{remote.DARKBLOOM_BIN} start --model gpt-oss-20b --idle-timeout 0",
-        f"rm -f {remote.FAST_SWITCH_STATE_PATH}",
-    ]
+    assert len(commands) == 4
+    assert commands[0] == f"rm -f {remote.FAST_SWITCH_STATE_PATH}"
+    assert "$HOME/.darkbloom/bin/darkbloom stop" in commands[1]
+    assert "sleep 300" in commands[1]
+    assert "nohup /bin/sh" in commands[1] and "fleet-cold-boot.status" in commands[2]
+    assert "$HOME/.darkbloom/bin/darkbloom start --model gpt-oss-20b --idle-timeout 0 --local-endpoint" in commands[1]
+    assert 'models = ["gpt-oss-20b"]' in commands[1]
+    assert commands[3] == f"rm -f {remote.FAST_SWITCH_STATE_PATH}"
 
 
-def test_live_switch_uses_the_watcher_binary_path_and_quotes_the_model(monkeypatch):
-    commands = _capture(monkeypatch)
+def test_live_switch_requires_a_consumer_key_for_the_api_check(monkeypatch):
+    _capture(monkeypatch)
+    with pytest.raises(RuntimeError, match="consumer API key"):
+        remote.execute_switch(dataclasses.replace(_cfg(True), api_key=None), "a")
+
+
+def test_api_warmup_is_self_routed(monkeypatch):
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"{}"
+
+    def open_request(request, timeout):
+        seen.update(url=request.full_url, headers=dict(request.header_items()), body=request.data, timeout=timeout)
+        return Response()
+
+    class Opener:
+        open = staticmethod(open_request)
+
+    monkeypatch.setattr(remote.urllib.request, "build_opener",
+                        lambda handler: seen.setdefault("handler", handler) and Opener())
+    remote._submit_api_warmup(_cfg(True), "a")
+    assert seen["url"] == "https://x/v1/chat/completions"
+    assert seen["headers"]["X-darkbloom-route"] == "self"
+    assert seen["headers"]["Authorization"] == "Bearer " + __name__
+    assert b'"model": "a"' in seen["body"]
+    assert isinstance(seen["handler"], remote._NoRedirect)
+
+
+def test_api_warmup_retries_transient_failure(monkeypatch):
+    attempts = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"{}"
+
+    class Opener:
+        def open(self, request, timeout):
+            attempts.append(request)
+            if len(attempts) == 1:
+                raise OSError("not ready")
+            return Response()
+
+    monkeypatch.setattr(remote.urllib.request, "build_opener", lambda handler: Opener())
+    monkeypatch.setattr(remote.time, "sleep", lambda seconds: None)
+    remote._submit_api_warmup(_cfg(True), "a")
+    assert len(attempts) == 2
+
+
+def test_api_warmup_refuses_a_non_https_base_url():
+    with pytest.raises(RuntimeError, match="non-HTTPS"):
+        remote._submit_api_warmup(dataclasses.replace(_cfg(True), base_url="http://x"), "a")
+
+
+def test_live_switch_quotes_the_model(monkeypatch):
+    commands = _capture(monkeypatch, "0")
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
     remote.execute_switch(_cfg(True), "gpt oss; rm")
-    assert Path(remote.DARKBLOOM_BIN).expanduser() == Path.home() / ".darkbloom" / "bin" / "darkbloom"
-    assert commands == [f"{remote.DARKBLOOM_BIN} start --model 'gpt oss; rm' --idle-timeout 0"]
+    assert "$HOME/.darkbloom/bin/darkbloom start --model 'gpt oss; rm'" in commands[1]
+    assert 'models = ["gpt oss; rm"]' in commands[1]
     assert "models list" not in remote._STATE_COMMAND
+
+
+def test_live_switch_starts_and_checks_each_requested_model(monkeypatch):
+    commands = _capture(monkeypatch, "0")
+    checked = []
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: checked.append(model))
+    remote.execute_switch(_cfg(True), ("qwen", "oss"))
+    assert "start --model qwen --model oss" in commands[1]
+    assert 'models = ["qwen", "oss"]' in commands[1]
+    assert checked == ["qwen", "oss"]
+
+
+def test_live_switch_retries_a_transient_status_poll_failure(monkeypatch):
+    replies = iter(("", "", RuntimeError("ssh down"), "", "0"))
+
+    def run(_cfg, _command, timeout):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(remote, "_run_ssh", run)
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
+    monkeypatch.setattr(remote.time, "sleep", lambda seconds: None)
+    remote.execute_switch(_cfg(True), "a")
+
+
+def test_remote_operation_finishes_before_the_lease_expires():
+    from fleet import collector
+
+    assert remote.COLD_BOOT_SECONDS + remote.REMOTE_WARMUP_SECONDS < remote.REMOTE_POLL_SECONDS
+    assert remote.REMOTE_POLL_SECONDS < collector._SWITCH_LEASE_SECONDS
 
 
 def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):
@@ -200,6 +305,52 @@ def test_inventory_fetch_is_a_separate_all_json_list_command(monkeypatch):
     assert commands == [remote._INVENTORY_COMMAND]
     assert remote._INVENTORY_COMMAND == f"{remote.DARKBLOOM_BIN} models list --all --json"
     assert "models list" not in remote._STATE_COMMAND
+
+
+def test_model_memory_uses_cli_estimates(monkeypatch):
+    _capture(monkeypatch, '{"models": [{"id": "a", "estimated_memory_gb": 13.5}]}')
+    assert remote.fetch_model_memory(_cfg(False)) == {"a": 13.5}
+
+
+@pytest.mark.parametrize("payload", ('{}', '{"models": []}',
+                                      '{"models": [{"id": "a", "estimated_memory_gb": 0}]}'))
+def test_model_memory_rejects_missing_or_invalid_estimates(monkeypatch, payload):
+    _capture(monkeypatch, payload)
+    with pytest.raises(RuntimeError, match="malformed"):
+        remote.fetch_model_memory(_cfg(False))
+
+
+def test_empty_switch_target_is_rejected():
+    with pytest.raises(RuntimeError, match="without a target"):
+        remote.execute_switch(_cfg(True), ())
+
+
+def test_cold_boot_reports_remote_failure_and_kills_a_timed_out_operation(monkeypatch):
+    _capture(monkeypatch, "2")
+    with pytest.raises(RuntimeError, match="exit 2"):
+        remote._wait_for_cold_boot(_cfg(True), "status", "pid")
+
+    commands = _capture(monkeypatch)
+    ticks = iter((0, remote.REMOTE_POLL_SECONDS + 1))
+    monkeypatch.setattr(remote.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(TimeoutError):
+        remote._wait_for_cold_boot(_cfg(True), "status", "pid")
+    assert "kill" in commands[0]
+
+
+def test_api_warmup_raises_after_three_failures(monkeypatch):
+    class Opener:
+        def open(self, request, timeout):
+            raise OSError("down")
+
+    monkeypatch.setattr(remote.urllib.request, "build_opener", lambda handler: Opener())
+    monkeypatch.setattr(remote.time, "sleep", lambda seconds: None)
+    with pytest.raises(OSError, match="down"):
+        remote._submit_api_warmup(_cfg(True), "a")
+
+
+def test_redirect_handler_refuses_redirects():
+    assert remote._NoRedirect().redirect_request() is None
 
 
 def test_inventory_fetch_rejects_malformed_json(monkeypatch):

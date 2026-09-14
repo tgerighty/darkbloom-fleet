@@ -1,6 +1,8 @@
 """run_tick and its helpers with every external call stubbed: no SSH, no
 database, no network."""
 import dataclasses
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +18,7 @@ def _cfg(**overrides) -> SimpleNamespace:
             "weights": {}, "ema_tau_minutes": 20.0, "poll_interval_seconds": 60.0, "relative_margin": 0.25,
             "absolute_margin": 0.01, "switch_cost_seconds": 300.0, "decision_horizon_seconds": 3600.0,
             "min_dwell_seconds": 1800.0, "live_execution": True, "restart_backoff_seconds": 30.0,
-            "probe_self_route": False, "api_key": None}
+            "probe_self_route": False, "api_key": None, "dual_model_min_gb": 64.0}
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -167,12 +169,65 @@ def test_maybe_execute_reapplies_host_gates_on_the_fresh_read(monkeypatch):
     assert executed is False and "safety gate" in error
 
 
+def test_live_cold_boots_are_serialized_across_hosts(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
+    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a", "b"))
+
+    def execute(cfg, models):
+        calls.append(models)
+        if len(calls) == 1:
+            entered.set()
+            release.wait(1)
+
+    monkeypatch.setattr(collector.remote, "execute_switch", execute)
+    args = (_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
+    first = threading.Thread(target=collector._maybe_execute, args=args)
+    second = threading.Thread(target=collector._maybe_execute, args=args)
+    first.start()
+    assert entered.wait(1)
+    second.start()
+    time.sleep(0.02)
+    assert calls == [("b",)]
+    release.set()
+    first.join(1)
+    second.join(1)
+    assert calls == [("b",), ("b",)]
+
+
+def test_database_lease_blocks_and_is_released_after_a_switch(monkeypatch):
+    pool = object()
+    released = []
+    monkeypatch.setattr(collector.db, "acquire_switch_lease", lambda *args: False)
+    assert "another host" in collector._maybe_execute(
+        _cfg(), pool, Decision("b", "r", "SWITCH"), 100.0)[1]
+
+    monkeypatch.setattr(collector.db, "acquire_switch_lease", lambda *args: True)
+    monkeypatch.setattr(collector.db, "release_switch_lease", lambda *args: released.append(args))
+    monkeypatch.setattr(collector, "_execute_with_lease", lambda cfg, decision: (True, None))
+    assert collector._maybe_execute(_cfg(), pool, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
+    assert released and released[0][0] is pool
+
+
 def test_unknown_inventory_on_the_tick_keeps_current_instead_of_switching(monkeypatch):
     ema = _would_switch(monkeypatch)
     daemon = _live_daemon(installed_models=None)
     result = collector._decide(_cfg(), None, ema, daemon, 10_000.0)
     assert result.action == "KEEP" and result.target == "a"
     assert "inventory unknown" in result.reason
+
+
+def test_64gb_host_decides_the_best_two_model_combination(monkeypatch):
+    monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: 0.0)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: None)
+    daemon = _live_daemon(warm_models=("a", "c"), total_memory_gb=64.0,
+                          installed_models=("a", "b", "c"))
+    monkeypatch.setattr(collector, "_fetch_model_memory", lambda cfg: {"a": 10.0, "b": 20.0, "c": 30.0})
+    result = collector._decide(_cfg(models=("a", "b", "c")), None,
+                               {"a": 1.0, "b": 2.0, "c": 0.1}, daemon, 10_000.0)
+    assert result.action == "SWITCH" and result.models == ("b", "a")
 
 
 def test_a_failing_watcher_launch_is_logged_not_raised(monkeypatch, caplog):

@@ -78,6 +78,7 @@ function hostRoot(before, after) {
     contains: function (el) { return Boolean(el && el._inHosts); },
     toggle: toggle,
     html: function () { return html; },
+    replaceChildren: function (...nodes) { html = nodes.map(function (n) { return n.html; }).join(""); phase = "after"; },
   };
   Object.defineProperty(root, "innerHTML", {
     set: function (v) { html = v; phase = "after"; },
@@ -87,7 +88,10 @@ function hostRoot(before, after) {
 }
 
 function demandNode(throwValue) {
-  const demand = { html: "" };
+  const demand = { html: "", replaceChildren: function (...nodes) {
+    if (throwValue) throw throwValue;
+    demand.html = nodes.map(function (n) { return n.html; }).join("");
+  } };
   Object.defineProperty(demand, "innerHTML", {
     set: function (v) {
       if (throwValue) throw throwValue;
@@ -126,6 +130,13 @@ export async function boot(opts) {
   };
   let tick;
   vi.stubGlobal("document", doc);
+  vi.stubGlobal("DOMParser", class {
+    parseFromString(html) {
+      return { body: { childNodes: [{ html: html }] }, querySelectorAll: function (selector) {
+        return selector === "*" ? (opts.parsedNodes || []) : [];
+      } };
+    }
+  });
   vi.stubGlobal("setInterval", function (fn, ms) { tick = fn; tick.ms = ms; return 1; });
   vi.stubGlobal("fetch", opts.fetch);
   if (opts.now !== undefined) vi.spyOn(Date, "now").mockReturnValue(opts.now);

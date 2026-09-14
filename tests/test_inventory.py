@@ -190,3 +190,18 @@ def test_a_failing_inventory_read_is_logged_and_unknown(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="fleet.collector"):
         assert collector._fetch_installed(_cfg()) is None
     assert "installed-model inventory unknown" in caplog.text
+
+
+def test_a_failing_memory_inventory_read_is_logged_and_unknown(monkeypatch, caplog):
+    monkeypatch.setattr(collector.remote, "fetch_model_memory", _boom)
+    assert collector._fetch_model_memory(_cfg()) is None
+    assert "memory inventory unknown" in caplog.text
+
+
+def test_a_64gb_host_waits_when_memory_inventory_is_unknown(monkeypatch):
+    monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: 0.0)
+    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: None)
+    monkeypatch.setattr(collector, "_fetch_model_memory", lambda cfg: None)
+    result = collector._decide(_cfg(), None, {"a": 1, "b": 2},
+                               _live_daemon(total_memory_gb=64), 10_000.0)
+    assert result.action == "WAIT" and "memory inventory" in result.reason

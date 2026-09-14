@@ -41,13 +41,30 @@ function setSubtitle(s) {
     " · refreshed " + new Date().toLocaleTimeString();
 }
 
+function safeNodes(html) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  parsed.querySelectorAll("script,iframe,object,embed").forEach(function (node) { node.remove(); });
+  parsed.querySelectorAll("*").forEach(function (node) {
+    Array.from(node.attributes).forEach(function (attr) {
+      const value = attr.value.trim().toLowerCase();
+      const unsafeUri = ["javascript:", "data:", "vbscript:"].some(function (scheme) {
+        return value.startsWith(scheme);
+      });
+      if (attr.name.toLowerCase().startsWith("on") || unsafeUri) {
+        node.removeAttribute(attr.name);
+      }
+    });
+  });
+  return Array.from(parsed.body.childNodes);
+}
+
 function render(s) {
   const hostsRoot = document.getElementById("hosts");
   const snap = captureUiState(hostsRoot.querySelectorAll(".card"));
   const focus = captureFocus(document.activeElement, hostsRoot);
   try {
-    document.getElementById("demand").innerHTML = renderDemand(mergeDemand(s.hosts), s.hosts);
-    hostsRoot.innerHTML = renderHosts(s.hosts, servingWindow, hourlySection);
+    document.getElementById("demand").replaceChildren(...safeNodes(renderDemand(mergeDemand(s.hosts), s.hosts)));
+    hostsRoot.replaceChildren(...safeNodes(renderHosts(s.hosts, servingWindow, hourlySection)));
     hostsRoot.classList.toggle("stale-poll", Boolean(pollError));
     restoreUiState(hostsRoot.querySelectorAll(".card"), snap);
     restoreFocus(document, focus);
