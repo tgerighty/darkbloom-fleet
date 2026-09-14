@@ -22,6 +22,8 @@
        display: flex; align-items: center; gap: 0.8rem; }
   h2 select { font: inherit; text-transform: none; letter-spacing: 0; }
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .table-scroll { max-width: 100%; overflow-x: auto; }
+  .table-scroll table { min-width: 42rem; }
   th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid light-dark(#0002, #fff2); }
   th { opacity: 0.6; font-weight: 500; }
   .scroll { max-height: 11.5rem; overflow-y: auto; }   /* ~5 rows */
@@ -38,7 +40,7 @@
   /* Per-host console cards */
   .cards { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
   @media (min-width: 1100px) { .cards { grid-template-columns: 1fr 1fr; } }
-  .card { background: light-dark(#fff, #1c1d21); border: 1px solid light-dark(#0002, #fff2);
+  .card { min-width: 0; background: light-dark(#fff, #1c1d21); border: 1px solid light-dark(#0002, #fff2);
           border-left: 3px solid light-dark(#d5d5da, #4a4b52); border-radius: 10px; overflow: hidden; }
   .card.earning { border-left-color: light-dark(#1c7c4a, #7fd3a6); }
   .card.stale, .card.off { border-left-color: light-dark(#c0392b, #e07a70); }
@@ -96,7 +98,7 @@
   /* Jobs · hourly buckets: terminal-style monospace panel. The eight model
      colours are a categorical set validated for CVD separation and contrast
      on the panel surface in both modes (dataviz palette checks). */
-  pre.hourly { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; margin: 0;
+  pre.hourly { box-sizing: border-box; max-width: 100%; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; margin: 0;
                padding: 0.55rem 0.75rem; border-radius: 6px; overflow-x: auto;
                background: light-dark(#fafafc, #141519); }
   pre.hourly .m0 { color: light-dark(#2b6cb0, #4a90d9); }
@@ -137,8 +139,8 @@
   <section>
     <details class="fold">
       <summary>Live demand (network)</summary>
-      <table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead>
-      <tbody id="demand"></tbody></table>
+      <div class="table-scroll"><table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead>
+      <tbody id="demand"></tbody></table></div>
     </details>
   </section>
   <div id="hosts" class="cards"></div>
