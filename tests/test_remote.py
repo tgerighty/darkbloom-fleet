@@ -258,7 +258,7 @@ def test_live_switch_starts_and_checks_each_requested_model(monkeypatch):
 
 
 def test_live_switch_retries_a_transient_status_poll_failure(monkeypatch):
-    replies = iter(("", "", RuntimeError("ssh down"), "0"))
+    replies = iter(("", "", RuntimeError("ssh down"), "", "0"))
 
     def run(_cfg, _command, timeout):
         reply = next(replies)
@@ -310,6 +310,47 @@ def test_inventory_fetch_is_a_separate_all_json_list_command(monkeypatch):
 def test_model_memory_uses_cli_estimates(monkeypatch):
     _capture(monkeypatch, '{"models": [{"id": "a", "estimated_memory_gb": 13.5}]}')
     assert remote.fetch_model_memory(_cfg(False)) == {"a": 13.5}
+
+
+@pytest.mark.parametrize("payload", ('{}', '{"models": []}',
+                                      '{"models": [{"id": "a", "estimated_memory_gb": 0}]}'))
+def test_model_memory_rejects_missing_or_invalid_estimates(monkeypatch, payload):
+    _capture(monkeypatch, payload)
+    with pytest.raises(RuntimeError, match="malformed"):
+        remote.fetch_model_memory(_cfg(False))
+
+
+def test_empty_switch_target_is_rejected():
+    with pytest.raises(RuntimeError, match="without a target"):
+        remote.execute_switch(_cfg(True), ())
+
+
+def test_cold_boot_reports_remote_failure_and_kills_a_timed_out_operation(monkeypatch):
+    _capture(monkeypatch, "2")
+    with pytest.raises(RuntimeError, match="exit 2"):
+        remote._wait_for_cold_boot(_cfg(True), "status", "pid")
+
+    commands = _capture(monkeypatch)
+    ticks = iter((0, remote.REMOTE_POLL_SECONDS + 1))
+    monkeypatch.setattr(remote.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(TimeoutError):
+        remote._wait_for_cold_boot(_cfg(True), "status", "pid")
+    assert "kill" in commands[0]
+
+
+def test_api_warmup_raises_after_three_failures(monkeypatch):
+    class Opener:
+        def open(self, request, timeout):
+            raise OSError("down")
+
+    monkeypatch.setattr(remote.urllib.request, "build_opener", lambda handler: Opener())
+    monkeypatch.setattr(remote.time, "sleep", lambda seconds: None)
+    with pytest.raises(OSError, match="down"):
+        remote._submit_api_warmup(_cfg(True), "a")
+
+
+def test_redirect_handler_refuses_redirects():
+    assert remote._NoRedirect().redirect_request() is None
 
 
 def test_inventory_fetch_rejects_malformed_json(monkeypatch):

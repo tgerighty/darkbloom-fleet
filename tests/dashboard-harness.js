@@ -132,7 +132,9 @@ export async function boot(opts) {
   vi.stubGlobal("document", doc);
   vi.stubGlobal("DOMParser", class {
     parseFromString(html) {
-      return { body: { childNodes: [{ html: html }] }, querySelectorAll: function () { return []; } };
+      return { body: { childNodes: [{ html: html }] }, querySelectorAll: function (selector) {
+        return selector === "*" ? (opts.parsedNodes || []) : [];
+      } };
     }
   });
   vi.stubGlobal("setInterval", function (fn, ms) { tick = fn; tick.ms = ms; return 1; });

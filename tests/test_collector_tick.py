@@ -197,6 +197,20 @@ def test_live_cold_boots_are_serialized_across_hosts(monkeypatch):
     assert calls == [("b",), ("b",)]
 
 
+def test_database_lease_blocks_and_is_released_after_a_switch(monkeypatch):
+    pool = object()
+    released = []
+    monkeypatch.setattr(collector.db, "acquire_switch_lease", lambda *args: False)
+    assert "another host" in collector._maybe_execute(
+        _cfg(), pool, Decision("b", "r", "SWITCH"), 100.0)[1]
+
+    monkeypatch.setattr(collector.db, "acquire_switch_lease", lambda *args: True)
+    monkeypatch.setattr(collector.db, "release_switch_lease", lambda *args: released.append(args))
+    monkeypatch.setattr(collector, "_execute_with_lease", lambda cfg, decision: (True, None))
+    assert collector._maybe_execute(_cfg(), pool, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
+    assert released and released[0][0] is pool
+
+
 def test_unknown_inventory_on_the_tick_keeps_current_instead_of_switching(monkeypatch):
     ema = _would_switch(monkeypatch)
     daemon = _live_daemon(installed_models=None)

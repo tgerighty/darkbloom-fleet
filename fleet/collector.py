@@ -96,15 +96,21 @@ def _probe_self_route(cfg: Config, pool: ConnectionPool, now: float) -> None:
     db.insert_self_route_samples(pool, now, counts)
 
 
+def _rank(cfg: Config, ema: dict[str, float], daemon: DaemonState,
+          anchor: float, now: float, guardrails: Guardrails) -> Decision:
+    if (daemon.total_memory_gb or 0) >= cfg.dual_model_min_gb:
+        memory = _fetch_model_memory(cfg)
+        if memory is None:
+            return Decision(daemon.current_model, "model memory inventory unavailable", "WAIT")
+        return decision_mod.decide_pair(ema, daemon, anchor, now, guardrails, memory)
+    return decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+
+
 def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: DaemonState | None, now: float) -> Decision:
-    """Without a fresh daemon read neither the current model nor idleness is
-    known, so the only safe decision is to wait for the next tick."""
+    """Return a gated model decision from one fresh provider snapshot."""
     if daemon is None or not daemon.fresh:
         return Decision(None, "daemon state unavailable or stale", "WAIT")
     anchor = db.dwell_anchor(pool, cfg.host_id, daemon.started_at)
-    # The measured post-restart penalty replaces the configured estimate once
-    # enough completed sessions exist (routability.measured_switch_cost); the
-    # configured value stays the fallback.
     measured = routability.measured_switch_cost(pool, cfg.host_id)
     guardrails = Guardrails(
         relative_margin=cfg.relative_margin, absolute_margin=cfg.absolute_margin,
@@ -112,16 +118,7 @@ def _decide(cfg: Config, pool: ConnectionPool, ema: dict[str, float], daemon: Da
         decision_horizon_seconds=cfg.decision_horizon_seconds,
         min_dwell_seconds=cfg.min_dwell_seconds,
     )
-    if (daemon.total_memory_gb or 0) >= cfg.dual_model_min_gb:
-        memory = _fetch_model_memory(cfg)
-        if memory is None:
-            return Decision(daemon.current_model, "model memory inventory unavailable", "WAIT")
-        result = decision_mod.decide_pair(
-            ema, daemon.warm_models, anchor, now, daemon.inference_active,
-            guardrails, memory, (daemon.total_memory_gb or 0) * 0.9,
-        )
-    else:
-        result = decision_mod.decide(ema, daemon.current_model, anchor, now, daemon.inference_active, guardrails)
+    result = _rank(cfg, ema, daemon, anchor, now, guardrails)
     result = decision_mod.apply_warm_target_gate(result, daemon)
     result = decision_mod.apply_host_gates(result, daemon, now)
     return decision_mod.apply_inventory_gate(result, daemon)

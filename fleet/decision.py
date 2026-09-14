@@ -101,21 +101,30 @@ def decide(
     )
 
 
-def decide_pair(
-    ema: dict[str, float], warm_models: tuple[str, ...], last_switch_at: float,
-    now: float, inference_active: bool, guardrails: Guardrails,
-    model_memory_gb: dict[str, float], memory_limit_gb: float,
-) -> Decision:
+def _single_decision(ema: dict[str, float], daemon: DaemonState, last_switch_at: float,
+                     now: float, guardrails: Guardrails) -> Decision:
+    current = next((model for model in daemon.warm_models if model in ema), None)
+    return decide(ema, current, last_switch_at, now, daemon.inference_active, guardrails)
+
+
+def _feasible_pairs(ema: dict[str, float], model_memory_gb: dict[str, float],
+                    memory_limit_gb: float) -> list[tuple[str, str]]:
+    return [pair for pair in combinations(ema, 2)
+            if all(model in model_memory_gb for model in pair)
+            and sum(model_memory_gb[model] for model in pair) <= memory_limit_gb]
+
+
+def decide_pair(ema: dict[str, float], daemon: DaemonState, last_switch_at: float,
+                now: float, guardrails: Guardrails,
+                model_memory_gb: dict[str, float]) -> Decision:
     """Rank a two-model resident set by its combined smoothed earnings score."""
     if len(ema) < 2:
-        current = next((model for model in warm_models if model in ema), None)
-        return decide(ema, current, last_switch_at, now, inference_active, guardrails)
-    pairs = [pair for pair in combinations(ema, 2)
-             if all(model in model_memory_gb for model in pair)
-             and sum(model_memory_gb[model] for model in pair) <= memory_limit_gb]
+        return _single_decision(ema, daemon, last_switch_at, now, guardrails)
+    warm_models = daemon.warm_models
+    memory_limit_gb = (daemon.total_memory_gb or 0) * 0.9
+    pairs = _feasible_pairs(ema, model_memory_gb, memory_limit_gb)
     if not pairs:
-        current = next((model for model in warm_models if model in ema), None)
-        return decide(ema, current, last_switch_at, now, inference_active, guardrails)
+        return _single_decision(ema, daemon, last_switch_at, now, guardrails)
     pair = max(pairs, key=lambda models: sum(ema[model] for model in models))
     pair = tuple(sorted(pair, key=ema.get, reverse=True))
     current = tuple(model for model in warm_models if model in ema)[:2]
@@ -132,7 +141,7 @@ def decide_pair(
     if now - last_switch_at < guardrails.min_dwell_seconds:
         return Decision(current[0] if current else pair[0], "best pair clears margin but minimum dwell remains", "KEEP", current)
     target = next(model for model in pair if model not in warm_models)
-    action = "SWITCH_WHEN_IDLE" if inference_active else "SWITCH"
+    action = "SWITCH_WHEN_IDLE" if daemon.inference_active else "SWITCH"
     return Decision(target, f"best pair clears margin: {', '.join(pair)}", action, pair)
 
 
@@ -160,6 +169,14 @@ def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decis
     return None
 
 
+def _first_load_error(result: Decision, daemon: DaemonState, now: float) -> Decision | None:
+    for model in result.models or ((result.target,) if result.target else ()):
+        blocked = _load_error_gate(Decision(model, result.reason, result.action), daemon, now)
+        if blocked:
+            return blocked
+    return None
+
+
 def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decision:
     """Thermal, trust, and load-error gates. OBSERVE and LIVE share this path.
     Missing trust is not hardware: a switch-like decision becomes KEEP."""
@@ -176,11 +193,7 @@ def apply_host_gates(result: Decision, daemon: DaemonState, now: float) -> Decis
             f"{result.reason}; trust is {label}, not hardware; no restart during attestation",
             "KEEP",
         )
-    for model in result.models or ((result.target,) if result.target else ()):
-        blocked = _load_error_gate(Decision(model, result.reason, result.action), daemon, now)
-        if blocked is not None:
-            return blocked
-    return result
+    return _first_load_error(result, daemon, now) or result
 
 
 def apply_warm_target_gate(result: Decision, daemon: DaemonState) -> Decision:

@@ -298,9 +298,7 @@ def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
                    created_at=r[4], provider_hash=r[5] or None) for r in rows]
 
 
-def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
-    """Live mode only. Caller must have already confirmed idle + dwell +
-    backoff; this makes no safety checks of its own — see collector.py."""
+def _checked_models(cfg: Config, target_models: str | tuple[str, ...]) -> tuple[str, ...]:
     if not cfg.live_execution:
         raise RuntimeError("refusing to execute a switch: FLEET_LIVE_EXECUTION is not enabled")
     if not cfg.api_key:
@@ -309,7 +307,10 @@ def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
     models = tuple(dict.fromkeys(requested))
     if not models:
         raise RuntimeError("refusing to switch without a target model")
-    clear_fast_switch_target(cfg)
+    return models
+
+
+def _cold_boot_launch(cfg: Config, models: tuple[str, ...]) -> tuple[str, str]:
     model_args = " ".join(f"--model {shlex.quote(model)}" for model in models)
     warmup = _LOCAL_WARMUP_SNIPPET.format(
         models=json.dumps(models), warmup_seconds=REMOTE_WARMUP_SECONDS)
@@ -339,6 +340,10 @@ def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
         f"echo $! > {pid_file}"
     )
     _run_ssh(cfg, launch, timeout=20)
+    return status, pid_file
+
+
+def _wait_for_cold_boot(cfg: Config, status: str, pid_file: str) -> None:
     deadline = time.monotonic() + REMOTE_POLL_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -359,6 +364,14 @@ def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
             timeout=20,
         )
         raise TimeoutError("remote cold boot did not finish")
+
+
+def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
+    """Run one checked, detached cold boot after the caller's safety gates."""
+    models = _checked_models(cfg, target_models)
+    clear_fast_switch_target(cfg)
+    status, pid_file = _cold_boot_launch(cfg, models)
+    _wait_for_cold_boot(cfg, status, pid_file)
     for model in models:
         _submit_api_warmup(cfg, model)
 

@@ -15,6 +15,16 @@ afterEach(function () {
 });
 
 describe("dashboard poll and redraw", function () {
+  it("removes event handlers and unsafe URI attributes", async function () {
+    const removed = [];
+    const node = {
+      attributes: [{ name: "onclick", value: "run()" }, { name: "href", value: " javascript:run()" }],
+      removeAttribute: function (name) { removed.push(name); },
+    };
+    await boot({ fetch: okFetch({ hosts: [host("M3")] }), parsedNodes: [node] });
+    expect(removed).toEqual(["onclick", "href", "onclick", "href"]);
+  });
+
   it("renders both hosts, hourly rows, KEEP under OBSERVE, and restores fold scroll and window focus",
     async function () {
       const foldsBefore = [fold("trust", true), fold("hourly", false)];
