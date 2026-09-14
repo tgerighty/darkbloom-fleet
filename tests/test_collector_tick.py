@@ -85,7 +85,7 @@ def test_payout_history_is_refreshed_only_every_fifteen_minutes(monkeypatch):
     monkeypatch.setattr(collector.db, "payout_rates",
                         lambda *args: calls.append("rates") or {("a",): (1.0, 7200), ("b",): (2.0, 7200)})
     monkeypatch.setattr(collector.db, "payout_confirmation_started_at",
-                        lambda pool, host, models, since, now: now - 300)
+                        lambda pool, host, models, since, now, max_gap: now - 300)
     monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: (300.0, 5))
     demand = Decision("b", "demand", "SWITCH", ("b",))
 
@@ -109,12 +109,12 @@ def test_confirmation_window_includes_one_poll_interval_of_jitter(monkeypatch):
     monkeypatch.setattr(collector, "_PAYOUT_CACHE",
                         {"h": (1000.0, {("a",): (1.0, 7200), ("b",): (2.0, 7200)}, 300.0)})
     monkeypatch.setattr(collector.db, "payout_confirmation_started_at",
-                        lambda pool, host, models, since, now: seen.append(since) or now - 305)
+                        lambda pool, host, models, since, now, max_gap: seen.append((since, max_gap)) or now - 305)
 
     result = collector._shadow_payout(_cfg(poll_interval_seconds=60), None, DAEMON,
                                       Decision("b", "demand", "SWITCH"), 1060.0)
 
-    assert result.action == "SWITCH" and seen == [700.0]
+    assert result.action == "SWITCH" and seen == [(700.0, 120)]
 
 
 def test_decide_anchors_dwell_on_the_daemon_start(monkeypatch):

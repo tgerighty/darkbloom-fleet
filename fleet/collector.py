@@ -257,9 +257,10 @@ def _shadow_payout(cfg: Config, pool: ConnectionPool, daemon: DaemonState | None
         _, rates, switch_cost = cached
         proposed = demand_result.models or ((demand_result.target,) if demand_result.target else ())
         started = db.payout_confirmation_started_at(
-            pool, cfg.host_id, proposed, now - 300 - cfg.poll_interval_seconds, now)
+            pool, cfg.host_id, proposed, now - 300 - cfg.poll_interval_seconds,
+            now, cfg.poll_interval_seconds * 2)
         return payout_decision.decide(daemon.warm_models, demand_result, rates, switch_cost,
-                                      cfg.decision_horizon_seconds, now - started)
+                                      3600.0, now - started)
     except Exception as error:  # noqa: BLE001 - shadow data must not break the collector
         log.warning("payout forecast unavailable: %s", error)
         return Decision(daemon.current_model, "payout history unavailable", "KEEP", daemon.warm_models)

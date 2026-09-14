@@ -301,16 +301,21 @@ def insert_decision(pool: ConnectionPool, host: str, observed_at: float, current
 
 
 _PAYOUT_RATES_SQL = """
-WITH raw_snapshots AS (
-    SELECT observed_at, warm_models,
-           least(coalesce(lead(observed_at) OVER (ORDER BY observed_at), %s), observed_at + 600) AS next_at,
-           fresh, trust_level
-    FROM daemon_snapshots
+WITH selected_snapshots AS (
+    SELECT observed_at, warm_models, fresh, trust_level FROM daemon_snapshots
     WHERE host = %s AND observed_at >= %s AND observed_at <= %s
+    UNION ALL
+    (SELECT observed_at, warm_models, fresh, trust_level FROM daemon_snapshots
+     WHERE host = %s AND observed_at < %s ORDER BY observed_at DESC LIMIT 1)
+), raw_snapshots AS (
+    SELECT observed_at, warm_models, fresh, trust_level,
+           least(coalesce(lead(observed_at) OVER (ORDER BY observed_at), %s), observed_at + 600) AS next_at
+    FROM selected_snapshots
 ), snapshots AS (
-    SELECT observed_at, next_at, ARRAY(SELECT unnest(warm_models) ORDER BY 1) AS models
+    SELECT greatest(observed_at, %s) AS observed_at, next_at,
+           ARRAY(SELECT unnest(warm_models) ORDER BY 1) AS models
     FROM raw_snapshots
-    WHERE fresh AND trust_level = 'hardware' AND next_at > observed_at
+    WHERE fresh AND trust_level = 'hardware' AND next_at > greatest(observed_at, %s)
 ), exposure AS (
     SELECT models, sum(next_at - observed_at) AS warm_seconds FROM snapshots
     GROUP BY 1
@@ -336,14 +341,16 @@ def payout_rates(pool: ConnectionPool, host: str, since: float, now: float,
     if not hashes:
         return {}
     with pool.connection() as conn:
-        rows = conn.execute(_PAYOUT_RATES_SQL, (now, host, since, now, since, now, hashes)).fetchall()
+        rows = conn.execute(_PAYOUT_RATES_SQL,
+                            (host, since, now, host, since, now, since, since, since, now, hashes)).fetchall()
     return {tuple(row["models"]): (float(row["micro_usd"]) / 1_000_000 * 3600 / float(row["warm_seconds"]),
                                    float(row["warm_seconds"]))
             for row in rows if float(row["warm_seconds"]) > 0}
 
 
 def payout_confirmation_started_at(pool: ConnectionPool, host: str,
-                                   models: tuple[str, ...], since: float, now: float) -> float:
+                                   models: tuple[str, ...], since: float, now: float,
+                                   max_gap: float) -> float:
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT observed_at, payout_target_models FROM decisions WHERE host = %s AND observed_at >= %s "
@@ -351,10 +358,13 @@ def payout_confirmation_started_at(pool: ConnectionPool, host: str,
         ).fetchall()
     wanted = set(models)
     started = now
+    newer = now
     for row in rows:
-        if set(row["payout_target_models"] or ()) != wanted:
+        observed_at = float(row["observed_at"])
+        if newer - observed_at > max_gap or set(row["payout_target_models"] or ()) != wanted:
             break
-        started = float(row["observed_at"])
+        started = observed_at
+        newer = observed_at
     return started
 
 
