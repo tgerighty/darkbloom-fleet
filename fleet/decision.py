@@ -115,8 +115,8 @@ def _feasible_pairs(ema: dict[str, float], model_memory_gb: dict[str, float],
 
 
 def _finish_pair(pair: tuple[str, str], current: tuple[str, ...], ema: dict[str, float],
-                 warm_models: tuple[str, ...], last_switch_at: float, now: float,
-                 guardrails: Guardrails, inference_active: bool) -> Decision:
+                 daemon: DaemonState, last_switch_at: float, now: float,
+                 guardrails: Guardrails) -> Decision:
     current_score = sum(ema[model] for model in current)
     discount = max(0.0, (guardrails.decision_horizon_seconds - guardrails.switch_cost_seconds)
                    / guardrails.decision_horizon_seconds)
@@ -127,8 +127,8 @@ def _finish_pair(pair: tuple[str, str], current: tuple[str, ...], ema: dict[str,
         return Decision(target, f"best pair below margin ({challenger_score:.3f} vs {current_score:.3f}; need >= {need:.3f})", "KEEP", current)
     if now - last_switch_at < guardrails.min_dwell_seconds:
         return Decision(current[0] if current else pair[0], "best pair clears margin but minimum dwell remains", "KEEP", current)
-    target = next(model for model in pair if model not in warm_models)
-    action = "SWITCH_WHEN_IDLE" if inference_active else "SWITCH"
+    target = next(model for model in pair if model not in daemon.warm_models)
+    action = "SWITCH_WHEN_IDLE" if daemon.inference_active else "SWITCH"
     return Decision(target, f"best pair clears margin: {', '.join(pair)}", action, pair)
 
 
@@ -148,8 +148,7 @@ def decide_pair(ema: dict[str, float], daemon: DaemonState, last_switch_at: floa
     current = tuple(model for model in warm_models if model in ema)[:2]
     if set(pair).issubset(warm_models):
         return Decision(pair[0], f"best model pair is already warm: {', '.join(pair)}", "KEEP", pair)
-    return _finish_pair(pair, current, ema, warm_models, last_switch_at, now,
-                        guardrails, daemon.inference_active)
+    return _finish_pair(pair, current, ema, daemon, last_switch_at, now, guardrails)
 
 
 def _load_error_gate(result: Decision, daemon: DaemonState, now: float) -> Decision | None:
