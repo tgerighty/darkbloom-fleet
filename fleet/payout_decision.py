@@ -6,20 +6,34 @@ from .types import Decision
 _MIN_EVIDENCE_SECONDS = 3600.0
 
 
+def _models(decision: Decision) -> tuple[str, ...]:
+    return tuple(sorted(decision.models or ((decision.target,) if decision.target else ())))
+
+
+def _supported_rate(rates: dict[tuple[str, ...], tuple[float, float]],
+                    models: tuple[str, ...]) -> float | None:
+    evidence = rates.get(models)
+    if evidence is None or evidence[1] < _MIN_EVIDENCE_SECONDS:
+        return None
+    return evidence[0]
+
+
 def decide(current: tuple[str, ...], demand: Decision,
            rates: dict[tuple[str, ...], tuple[float, float]], switch_cost_seconds: float,
            horizon_seconds: float, confirmed_seconds: float) -> Decision:
-    proposed = demand.models or ((demand.target,) if demand.target else ())
+    proposed = _models(demand)
     current = tuple(sorted(current))
-    proposed = tuple(sorted(proposed))
-    if demand.action not in {"SWITCH", "SWITCH_WHEN_IDLE"} or not proposed:
+    if demand.action not in {"SWITCH", "SWITCH_WHEN_IDLE"}:
         return Decision(current[0] if current else demand.target, "demand model does not propose a switch", "KEEP", current)
-    if any(models not in rates or rates[models][1] < _MIN_EVIDENCE_SECONDS
-           for models in (current, proposed)):
+    if not proposed:
+        return Decision(current[0] if current else demand.target, "demand model does not propose a switch", "KEEP", current)
+    current_rate = _supported_rate(rates, current)
+    proposed_rate = _supported_rate(rates, proposed)
+    if current_rate is None:
+        return Decision(current[0] if current else None, "insufficient payout evidence for current or proposed models", "KEEP", current)
+    if proposed_rate is None:
         return Decision(current[0] if current else None, "insufficient payout evidence for current or proposed models", "KEEP", current)
 
-    current_rate = rates[current][0]
-    proposed_rate = rates[proposed][0]
     gain = (proposed_rate - current_rate) * horizon_seconds / 3600.0
     switch_loss = current_rate * switch_cost_seconds / 3600.0
     if gain <= 2 * switch_loss:
