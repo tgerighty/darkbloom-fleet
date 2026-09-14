@@ -136,7 +136,7 @@ def _maybe_execute(cfg: Config, pool: ConnectionPool, decision: Decision, now: f
         return False, None
     with _SWITCH_LOCK:
         lease_owner = f"{cfg.host_id}:{time.time_ns()}"
-        if pool is not None and not db.acquire_switch_lease(pool, lease_owner, time.time(), _SWITCH_LEASE_SECONDS):
+        if pool is not None and not db.acquire_switch_lease(pool, lease_owner, _SWITCH_LEASE_SECONDS):
             return False, "aborted: another host cold boot is in progress"
         try:
             return _execute_with_lease(cfg, decision)

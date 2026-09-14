@@ -43,17 +43,22 @@ FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
 FAST_SWITCH_SCRIPT_PATH = f"{FAST_SWITCH_REMOTE_DIR}/fast_switch_watcher.py"
 FAST_SWITCH_STATE_PATH = f"{FAST_SWITCH_REMOTE_DIR}/fleet-target.json"
 COLD_BOOT_SECONDS = 300
+REMOTE_WARMUP_SECONDS = 600
+REMOTE_POLL_SECONDS = COLD_BOOT_SECONDS + REMOTE_WARMUP_SECONDS + 60
 
 _LOCAL_WARMUP_SNIPPET = """
 import json, os, subprocess, time, urllib.request
 from urllib.parse import urlparse
 cli = os.path.expanduser("~/.darkbloom/bin/darkbloom")
 models = {models}
+deadline = time.monotonic() + {warmup_seconds}
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
         return None
 for _ in range(24):
     try:
+        if time.monotonic() >= deadline:
+            raise RuntimeError("local warm-up timed out")
         local = json.loads(subprocess.check_output([cli, "local", "--json"]))
         if urlparse(local["base_url"]).hostname not in ("127.0.0.1", "::1", "localhost"):
             raise ValueError("local endpoint is not loopback")
@@ -61,13 +66,15 @@ for _ in range(24):
             body = json.dumps({{"model": model, "messages": [{{"role": "user", "content": "Reply OK."}}], "max_tokens": 1}}).encode()
             request = urllib.request.Request(local["base_url"] + "/chat/completions", body, {{
                 "Authorization": "Bearer " + local["api_key"], "Content-Type": "application/json"}})
-            with urllib.request.build_opener(NoRedirect()).open(request, timeout=600) as response:
+            remaining = max(1, deadline - time.monotonic())
+            with urllib.request.build_opener(NoRedirect()).open(request, timeout=min(120, remaining)) as response:
                 response.read()
         state = json.load(open(os.path.expanduser("~/.darkbloom/daemon-state.json")))
         trust = state.get("trust") if isinstance(state.get("trust"), dict) else {{}}
         if (set(state.get("warm_models") or ()) == set(models)
                 and trust.get("trust_level") == "hardware" and time.time() - float(state.get("written_at") or 0) <= 90):
             break
+        time.sleep(min(5, max(0, deadline - time.monotonic())))
     except (KeyError, OSError, subprocess.SubprocessError, TypeError, ValueError):
         time.sleep(5)
 else:
@@ -302,8 +309,10 @@ def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
     models = tuple(dict.fromkeys(requested))
     if not models:
         raise RuntimeError("refusing to switch without a target model")
+    clear_fast_switch_target(cfg)
     model_args = " ".join(f"--model {shlex.quote(model)}" for model in models)
-    warmup = _LOCAL_WARMUP_SNIPPET.format(models=json.dumps(models))
+    warmup = _LOCAL_WARMUP_SNIPPET.format(
+        models=json.dumps(models), warmup_seconds=REMOTE_WARMUP_SECONDS)
     operation = (
         "set -e\n"
         "$HOME/.darkbloom/bin/darkbloom stop\n"
@@ -313,6 +322,7 @@ def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
     )
     script = f"{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.sh"
     status = f"{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.status"
+    pid_file = f"{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.pid"
     launch = (
         "set -e\n"
         f"mkdir -p {FAST_SWITCH_REMOTE_DIR}\n"
@@ -320,22 +330,34 @@ def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
         f"cat > {script}.tmp <<'SH'\n"
         "#!/bin/sh\n"
         f"status={status}\n"
-        "finish() { code=$?; printf '%s\\n' \"$code\" > \"$status.tmp\"; mv -f \"$status.tmp\" \"$status\"; }\n"
+        f"pid_file={pid_file}\n"
+        "finish() { code=$?; rm -f \"$pid_file\"; printf '%s\\n' \"$code\" > \"$status.tmp\"; mv -f \"$status.tmp\" \"$status\"; }\n"
         "trap finish EXIT\n"
         f"{operation}\nSH\n"
         f"mv -f {script}.tmp {script}\n"
-        f"nohup /bin/sh {script} </dev/null >{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.log 2>&1 &"
+        f"nohup /bin/sh {script} </dev/null >{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.log 2>&1 & "
+        f"echo $! > {pid_file}"
     )
     _run_ssh(cfg, launch, timeout=20)
-    deadline = time.monotonic() + COLD_BOOT_SECONDS + 780
+    deadline = time.monotonic() + REMOTE_POLL_SECONDS
     while time.monotonic() < deadline:
-        result = _run_ssh(cfg, f"test -f {status} && cat {status} || true", timeout=20).strip()
+        try:
+            result = _run_ssh(cfg, f"test -f {status} && cat {status} || true", timeout=20).strip()
+        except RuntimeError:
+            time.sleep(5)
+            continue
         if result:
             if result != "0":
                 raise RuntimeError(f"remote cold boot failed with exit {result}")
             break
         time.sleep(5)
     else:
+        _run_ssh(
+            cfg,
+            f"pid=$(cat {pid_file} 2>/dev/null || true); "
+            "case \"$pid\" in ''|*[!0-9]*) exit 0;; esac; kill \"$pid\" 2>/dev/null || true",
+            timeout=20,
+        )
         raise TimeoutError("remote cold boot did not finish")
     for model in models:
         _submit_api_warmup(cfg, model)

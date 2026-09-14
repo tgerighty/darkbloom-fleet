@@ -161,13 +161,14 @@ def test_live_switch_and_target_clearing_run_the_expected_commands(monkeypatch):
     monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
     remote.execute_switch(_cfg(True), "gpt-oss-20b")
     remote.clear_fast_switch_target(_cfg(True))
-    assert len(commands) == 3
-    assert "$HOME/.darkbloom/bin/darkbloom stop" in commands[0]
-    assert "sleep 300" in commands[0]
-    assert "nohup /bin/sh" in commands[0] and "fleet-cold-boot.status" in commands[1]
-    assert "$HOME/.darkbloom/bin/darkbloom start --model gpt-oss-20b --idle-timeout 0 --local-endpoint" in commands[0]
-    assert 'models = ["gpt-oss-20b"]' in commands[0]
-    assert commands[2] == f"rm -f {remote.FAST_SWITCH_STATE_PATH}"
+    assert len(commands) == 4
+    assert commands[0] == f"rm -f {remote.FAST_SWITCH_STATE_PATH}"
+    assert "$HOME/.darkbloom/bin/darkbloom stop" in commands[1]
+    assert "sleep 300" in commands[1]
+    assert "nohup /bin/sh" in commands[1] and "fleet-cold-boot.status" in commands[2]
+    assert "$HOME/.darkbloom/bin/darkbloom start --model gpt-oss-20b --idle-timeout 0 --local-endpoint" in commands[1]
+    assert 'models = ["gpt-oss-20b"]' in commands[1]
+    assert commands[3] == f"rm -f {remote.FAST_SWITCH_STATE_PATH}"
 
 
 def test_live_switch_requires_a_consumer_key_for_the_api_check(monkeypatch):
@@ -241,8 +242,8 @@ def test_live_switch_quotes_the_model(monkeypatch):
     commands = _capture(monkeypatch, "0")
     monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
     remote.execute_switch(_cfg(True), "gpt oss; rm")
-    assert "$HOME/.darkbloom/bin/darkbloom start --model 'gpt oss; rm'" in commands[0]
-    assert 'models = ["gpt oss; rm"]' in commands[0]
+    assert "$HOME/.darkbloom/bin/darkbloom start --model 'gpt oss; rm'" in commands[1]
+    assert 'models = ["gpt oss; rm"]' in commands[1]
     assert "models list" not in remote._STATE_COMMAND
 
 
@@ -251,9 +252,31 @@ def test_live_switch_starts_and_checks_each_requested_model(monkeypatch):
     checked = []
     monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: checked.append(model))
     remote.execute_switch(_cfg(True), ("qwen", "oss"))
-    assert "start --model qwen --model oss" in commands[0]
-    assert 'models = ["qwen", "oss"]' in commands[0]
+    assert "start --model qwen --model oss" in commands[1]
+    assert 'models = ["qwen", "oss"]' in commands[1]
     assert checked == ["qwen", "oss"]
+
+
+def test_live_switch_retries_a_transient_status_poll_failure(monkeypatch):
+    replies = iter(("", "", RuntimeError("ssh down"), "0"))
+
+    def run(_cfg, _command, timeout):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(remote, "_run_ssh", run)
+    monkeypatch.setattr(remote, "_submit_api_warmup", lambda cfg, model: None)
+    monkeypatch.setattr(remote.time, "sleep", lambda seconds: None)
+    remote.execute_switch(_cfg(True), "a")
+
+
+def test_remote_operation_finishes_before_the_lease_expires():
+    from fleet import collector
+
+    assert remote.COLD_BOOT_SECONDS + remote.REMOTE_WARMUP_SECONDS < remote.REMOTE_POLL_SECONDS
+    assert remote.REMOTE_POLL_SECONDS < collector._SWITCH_LEASE_SECONDS
 
 
 def test_remove_fast_switch_target_needs_no_live_execution(monkeypatch):

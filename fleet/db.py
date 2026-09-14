@@ -155,13 +155,15 @@ def update_snapshot_installed_models(
         )
 
 
-def acquire_switch_lease(pool: ConnectionPool, owner: str, now: float, ttl_seconds: float) -> bool:
+def acquire_switch_lease(pool: ConnectionPool, owner: str, ttl_seconds: float) -> bool:
     with pool.connection() as conn:
         row = conn.execute(
-            "INSERT INTO switch_lease (singleton, owner, expires_at) VALUES (true, %s, %s) "
+            "WITH clock AS (SELECT EXTRACT(EPOCH FROM clock_timestamp()) AS now) "
+            "INSERT INTO switch_lease (singleton, owner, expires_at) "
+            "SELECT true, %s, clock.now + %s FROM clock "
             "ON CONFLICT (singleton) DO UPDATE SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at "
-            "WHERE switch_lease.expires_at < %s RETURNING owner",
-            (owner, now + ttl_seconds, now),
+            "WHERE switch_lease.expires_at < (SELECT now FROM clock) RETURNING owner",
+            (owner, ttl_seconds),
         ).fetchone()
     return bool(row and row["owner"] == owner)
 

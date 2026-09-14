@@ -54,13 +54,8 @@ happened and why.
   (idle-before-switch, EMA-smoothed confirmation, restart-retry backoff)
   - not just advisory, though v1 ships with those guardrails defaulted to
     OBSERVE mode (see "Safety default" in CONFIG.md).
-- **Catches idle gaps between poll ticks.** On 2026-09-11 the real host
-  wanted to switch to `gemma-4-26b-qat-4bit` for 8 consecutive ~60s ticks in
-  a row, because the host never happened to be idle at the exact instant any
-  tick ran - even though idle gaps were opening and closing between ticks.
-  When a tick finds a switch that clears every gate except idle, it launches
-  a self-locking 1s-poll watcher on the remote host (see "Fast idle-gap
-  watcher" below) instead of waiting for the next full cycle.
+- **Waits for verified idle state.** A busy host waits for a later fresh idle
+  collector tick before a cold boot starts.
 - **Several Macs, one service.** Each `DARKBLOOM_HOST_<N>_*` block is a
   managed Mac with its own model list. LLM-driven decision-making (as opposed
   to today's scored heuristic) remains follow-on work.
@@ -93,7 +88,7 @@ happened and why.
   environment variables or a mounted `./secrets/ssh` directory - never
   committed. See `.gitignore` and `CONFIG.md`.
 
-## Fast idle-gap watcher
+## Idle-gated cold boots
 
 The ~60s poll cadence is coarse: a challenger can clear every switch gate
 except idle, and the host can open and close idle gaps *between* ticks
@@ -113,7 +108,7 @@ checks prove the selected host; the API completion proves account routing.
 Hosts reporting at least `FLEET_DUAL_MODEL_MIN_GB` RAM rank the combined EMA
 score of two-model sets and launch the best pair, such as Qwen+OSS or
 OSS+Gemma. Smaller hosts rank one model. An already-warm winning set stays up.
-One process-wide lock prevents the two hosts from cold-booting together.
+A database lease prevents the two hosts from cold-booting together.
 
 ## Deferred to a follow-up (explicitly out of v1 scope)
 

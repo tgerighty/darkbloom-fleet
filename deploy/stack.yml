@@ -57,7 +57,7 @@ services:
       DATABASE_URL: postgresql://darkbloom_fleet@postgres:5432/darkbloom_fleet
       DATABASE_PASSWORD_FILE: darkbloom_fleet_db_password
       DARKBLOOM_SSH_CONFIG: /run/secrets/darkbloom_fleet_ssh_config
-      # Consumer key for the self-route routability probe (read-only listing).
+      # Shared key for the self-route listing and live completion warm-ups.
       DARKBLOOM_API_KEY_FILE: darkbloom_fleet_api_key
       DARKBLOOM_HOST_1_SSH_TARGET: m3-48-1
       # The _ID pins the database identity; _LABEL stays free to edit.

@@ -17,9 +17,10 @@ def test_init_schema_runs_the_schema(fake_pool):
 
 def test_switch_lease_is_acquired_and_released_by_owner(fake_pool):
     pool = fake_pool([{"owner": "h:1"}])
-    assert db.acquire_switch_lease(pool, "h:1", 10.0, 1800.0) is True
+    assert db.acquire_switch_lease(pool, "h:1", 1800.0) is True
     db.release_switch_lease(pool, "h:1")
-    assert pool.calls[0][1] == ("h:1", 1810.0, 10.0)
+    assert "clock_timestamp" in pool.calls[0][0]
+    assert pool.calls[0][1] == ("h:1", 1800.0)
     assert pool.calls[1][1] == ("h:1",)
 
 

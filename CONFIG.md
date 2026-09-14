@@ -69,7 +69,7 @@ Shared by every host:
 |---|---|---|
 | `DATABASE_PASSWORD_FILE` | unset | Set to `darkbloom_fleet_db_password` to load that Swarm secret into `DATABASE_URL`. |
 | `DARKBLOOM_SSH_CONFIG` | unset | SSH config passed to every `ssh` call with `-F` (a Swarm secret on the cluster). |
-| `DARKBLOOM_API_KEY_FILE` | unset | Set to `darkbloom_fleet_api_key` to load that Swarm secret. Host 1 then probes `GET /v1/models` with `X-Darkbloom-Route: self` once a minute and records which owned models are routable. |
+| `DARKBLOOM_API_KEY_FILE` | unset | Set to `darkbloom_fleet_api_key` to load the shared API key. It authenticates the self-routed model listing and live chat-completion warm-ups. |
 | `FLEET_BIND_HOST` | `127.0.0.1` | Address the dashboard binds to. Containers set `0.0.0.0` so Docker can reach it. |
 | `DARKBLOOM_BASE_URL` | `https://api.darkbloom.dev` | Public demand-capacity API base. |
 | `DARKBLOOM_PRICING_URL` | `https://api.darkbloom.dev/v1/pricing` | Public output-token pricing endpoint. |
