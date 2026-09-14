@@ -94,6 +94,29 @@ def test_payout_history_is_refreshed_only_every_fifteen_minutes(monkeypatch):
     assert calls == ["attribution", "rates"]
 
 
+def test_payout_shadow_degrades_to_keep_when_history_fails(monkeypatch, caplog):
+    monkeypatch.setattr(collector, "_PAYOUT_CACHE", {})
+    monkeypatch.setattr(collector.attribution, "provider_hosts", _boom)
+
+    result = collector._shadow_payout(_cfg(), None, DAEMON, Decision("b", "demand", "SWITCH"), 1000.0)
+
+    assert result.action == "KEEP" and result.models == ("a",)
+    assert "payout forecast unavailable" in caplog.text
+
+
+def test_confirmation_window_includes_one_poll_interval_of_jitter(monkeypatch):
+    seen = []
+    monkeypatch.setattr(collector, "_PAYOUT_CACHE",
+                        {"h": (1000.0, {("a",): (1.0, 7200), ("b",): (2.0, 7200)}, 300.0)})
+    monkeypatch.setattr(collector.db, "payout_confirmation_started_at",
+                        lambda pool, host, models, since, now: seen.append(since) or now - 305)
+
+    result = collector._shadow_payout(_cfg(poll_interval_seconds=60), None, DAEMON,
+                                      Decision("b", "demand", "SWITCH"), 1060.0)
+
+    assert result.action == "SWITCH" and seen == [700.0]
+
+
 def test_decide_anchors_dwell_on_the_daemon_start(monkeypatch):
     anchors = []
     monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: anchors.append(started) or started)

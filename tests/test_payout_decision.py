@@ -22,6 +22,7 @@ def test_payout_forecast_keeps_when_evidence_is_missing_or_gain_is_too_small():
 
     assert missing.action == "KEEP" and "evidence" in missing.reason
     assert narrow.action == "KEEP" and "switch loss" in narrow.reason
+    assert "$0.1667" in narrow.reason
 
 
 def test_payout_forecast_uses_exact_dual_model_rates():
