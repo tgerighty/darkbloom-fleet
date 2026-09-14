@@ -65,6 +65,11 @@ describe("high-level band and chips", function () {
     expect(actionLabel({ ...SWITCH, action: "KEEP" }, "OBSERVE")).toBe("KEEP");
   });
 
+  it("renders an incomplete payout shadow safely", function () {
+    const html = bandHtml(host({ recent_decisions: [{ ...SWITCH, payout_action: "KEEP" }] }), host().card);
+    expect(html).toContain("payout shadow: – · KEEP · ");
+  });
+
   it("marks the current loaded chip while idle and serving", function () {
     const idle = renderHost(host(), "24h", "");
     expect(idle).toContain("gemma · current");

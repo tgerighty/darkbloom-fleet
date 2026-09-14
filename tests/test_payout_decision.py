@@ -41,3 +41,10 @@ def test_payout_forecast_requires_five_elapsed_minutes_of_confirmation():
     result = decide(("a",), demand, rates, 300.0, 3600.0, 299)
 
     assert result.action == "KEEP" and result.models == ("b",) and "299/300s" in result.reason
+
+
+def test_payout_forecast_keeps_without_a_demand_switch_target():
+    rates = {("a",): (1.0, 7200.0)}
+
+    assert decide(("a",), Decision("a", "keep", "KEEP"), rates, 300, 3600, 300).action == "KEEP"
+    assert decide(("a",), Decision(None, "wait", "SWITCH"), rates, 300, 3600, 300).action == "KEEP"
