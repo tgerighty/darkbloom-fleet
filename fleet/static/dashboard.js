@@ -41,12 +41,14 @@ function setSubtitle(s) {
     " · refreshed " + new Date().toLocaleTimeString();
 }
 
-function safeNodes(html) {
-  const parsed = new DOMParser().parseFromString(html, "text/html");
-  parsed.querySelectorAll("script,iframe,object,embed").forEach(function (node) { node.remove(); });
-  parsed.querySelectorAll("*").forEach(function (node) {
+function safeNodes(html, context) {
+  const isTableBody = context.tagName === "TBODY";
+  const parsed = new DOMParser().parseFromString(isTableBody ? "<table><tbody>" + html + "</tbody></table>" : html, "text/html");
+  const root = isTableBody ? parsed.querySelector("tbody") : parsed.body;
+  root.querySelectorAll("script,iframe,object,embed").forEach(function (node) { node.remove(); });
+  root.querySelectorAll("*").forEach(function (node) {
     Array.from(node.attributes).forEach(function (attr) {
-      const value = attr.value.trim().toLowerCase();
+      const value = attr.value.replace(/[\u0000-\u0020\u007f]/g, "").toLowerCase();
       const unsafeUri = ["javascript:", "data:", "vbscript:"].some(function (scheme) {
         return value.startsWith(scheme);
       });
@@ -55,7 +57,7 @@ function safeNodes(html) {
       }
     });
   });
-  return Array.from(parsed.body.childNodes);
+  return Array.from(root.childNodes);
 }
 
 function render(s) {
@@ -63,8 +65,9 @@ function render(s) {
   const snap = captureUiState(hostsRoot.querySelectorAll(".card"));
   const focus = captureFocus(document.activeElement, hostsRoot);
   try {
-    document.getElementById("demand").replaceChildren(...safeNodes(renderDemand(mergeDemand(s.hosts), s.hosts)));
-    hostsRoot.replaceChildren(...safeNodes(renderHosts(s.hosts, servingWindow, hourlySection)));
+    const demandRoot = document.getElementById("demand");
+    demandRoot.replaceChildren(...safeNodes(renderDemand(mergeDemand(s.hosts), s.hosts), demandRoot));
+    hostsRoot.replaceChildren(...safeNodes(renderHosts(s.hosts, servingWindow, hourlySection), hostsRoot));
     hostsRoot.classList.toggle("stale-poll", Boolean(pollError));
     restoreUiState(hostsRoot.querySelectorAll(".card"), snap);
     restoreFocus(document, focus);
