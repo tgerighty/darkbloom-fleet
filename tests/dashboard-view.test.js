@@ -97,6 +97,10 @@ describe("no placeholder chrome", function () {
       current_model: "qwen", challenger_model: "qwen",
     } } }), "24h", "");
     expect(settled).not.toContain("challenger:");
+    const noStreak = renderHost(host({ card: { ...host().card, manager: {
+      current_model: "gemma", challenger_model: "qwen",
+    } } }), "24h", "");
+    expect(noStreak).toContain("qwen · 0/3 checks");
   });
 
   it("omits console-only tiles, dummy gauges, idle note, catalog chips, and priority", function () {
