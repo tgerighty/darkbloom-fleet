@@ -3,6 +3,7 @@ const TR = "<tr><td>";
 const FOLD_SEL = "details[data-fold]";
 const SCROLL_SEL = "[data-scroll]";
 const SERVING_WINDOW_ID = "serving-window";
+const HIDDEN_DEMAND_MODELS = new Set(["gemma-4-26b", "gemma-4-26b-8bit"]);
 
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" };
 export function esc(v) {
@@ -14,6 +15,7 @@ export function mergeDemand(hosts) {
   const byModel = new Map();
   (hosts || []).forEach(function (h) {
     (h.demand || []).forEach(function (r) {
+      if (HIDDEN_DEMAND_MODELS.has(r.model)) return;
       const seen = byModel.get(r.model);
       if (!seen || (r.observed_at || 0) > (seen.observed_at || 0)) byModel.set(r.model, r);
     });

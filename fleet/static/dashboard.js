@@ -1,8 +1,8 @@
 import { hourlySection } from "./hourly.js?v=4";
-import { esc, renderHosts } from "./host.js?v=5";
+import { esc, renderHosts } from "./host.js?v=6";
 import {
   captureFocus, captureUiState, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
-} from "./ui.js?v=4";
+} from "./ui.js?v=5";
 
 const SUBTITLE_ID = "fleet-subtitle";
 
