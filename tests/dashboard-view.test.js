@@ -93,6 +93,10 @@ describe("no placeholder chrome", function () {
     expect(html).toContain("gemma → qwen");
     expect(html).toContain("qwen · 2/3 checks");
     expect(html).toContain("3 checks required");
+    const settled = renderHost(host({ card: { ...host().card, manager: {
+      current_model: "qwen", challenger_model: "qwen",
+    } } }), "24h", "");
+    expect(settled).not.toContain("challenger:");
   });
 
   it("omits console-only tiles, dummy gauges, idle note, catalog chips, and priority", function () {
