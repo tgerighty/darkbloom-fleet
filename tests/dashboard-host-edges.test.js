@@ -159,11 +159,11 @@ describe("host card edges", function () {
       expect(load).not.toMatch(/class="band-sub err">load error/);
       const ten = "1234567890";
       const eleven = "12345678901";
-      expect(head(renderHost(host({ recent_decisions: [
-        { action: "SWITCH", target_model: ten, executed: false }] }), "24h", "")))
+      expect(head(renderHost(host({ card: { ...host().card, manager: {
+        mode: "LIVE", fresh: true, current_model: "gemma", target_model: ten } } }), "24h", "")))
         .toContain(">" + ten + "</span>");
-      expect(head(renderHost(host({ recent_decisions: [
-        { action: "SWITCH_WHEN_IDLE", target_model: eleven, executed: false }] }), "24h", "")))
+      expect(head(renderHost(host({ card: { ...host().card, manager: {
+        mode: "LIVE", fresh: true, current_model: "gemma", target_model: eleven } } }), "24h", "")))
         .toContain(">" + eleven.slice(0, 9) + "…</span>");
       expect(actionLabel(null, "LIVE")).toBe("");
       expect(actionLabel({}, "LIVE")).toBe("");

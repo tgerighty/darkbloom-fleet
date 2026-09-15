@@ -69,7 +69,6 @@ ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS last_model_load_error_at D
 -- Nullable: NULL = inventory unknown this tick; '{}' = verified empty cache.
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS installed_models TEXT[];
 ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS manager JSONB;
-ALTER TABLE daemon_snapshots ADD COLUMN IF NOT EXISTS manager_observer JSONB;
 
 -- One row per model the coordinator will route to on our machines, per probe.
 -- A probe that found nothing routable writes one row with model = '' so the
@@ -187,8 +186,8 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
             "trust_level, trust_reason, thermal_state, memory_pressure, cpu_usage, fan_rpm, "
             "peak_temperature_c, gpu_active_gb, gpu_cache_gb, total_memory_gb, "
             "last_model_load_error_model, last_model_load_error_message, last_model_load_error_at, "
-            "installed_models, slots, manager, manager_observer) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "installed_models, slots, manager) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (host, observed_at, daemon.current_model, list(daemon.warm_models),
              daemon.inference_active, daemon.fresh, daemon.pid, daemon.started_at,
              list(daemon.advertised_models), daemon.requests_served, daemon.trust_level, daemon.trust_reason,
@@ -198,8 +197,7 @@ def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, 
              daemon.last_model_load_error_at,
              None if daemon.installed_models is None else list(daemon.installed_models),
              Jsonb([dataclasses.asdict(s) for s in daemon.slots]),
-             Jsonb(daemon.manager) if daemon.manager is not None else None,
-             Jsonb(daemon.manager_observer) if daemon.manager_observer is not None else None),
+             Jsonb(daemon.manager) if daemon.manager is not None else None),
         )
 
 

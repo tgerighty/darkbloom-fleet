@@ -1,5 +1,5 @@
 import { hourlySection } from "./hourly.js?v=4";
-import { esc, renderHosts } from "./host.js?v=6";
+import { esc, renderHosts } from "./host.js?v=7";
 import {
   captureFocus, captureUiState, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
 } from "./ui.js?v=5";

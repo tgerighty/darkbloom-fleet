@@ -195,12 +195,6 @@ function shadowSection(fold, title, report) {
 
 function shadowSections(s, card) {
   const latest = (s.recent_decisions || [])[0] || {};
-  let observer = "";
-  if (card.manager_observer) {
-    const version = card.manager_observer.version ? " · v" + esc(card.manager_observer.version) : "";
-    observer = shadowSection("manager-observer", "Legacy manager observer · " +
-      esc(card.manager_observer.mode || "OBSERVE") + version, card.manager_observer);
-  }
   return shadowSection("demand-shadow", "Fleet demand shadow · OBSERVE", {
     current_model: latest.current_model, target_model: latest.target_model,
     action: actionLabel(latest, s.mode), reason: latest.reason, error: latest.error, as_of: latest.observed_at,
@@ -208,7 +202,7 @@ function shadowSections(s, card) {
     current_model: latest.current_model,
     target_model: (latest.payout_target_models || []).join(" + "), action: latest.payout_action,
     reason: latest.payout_reason, as_of: latest.observed_at,
-  }) + observer;
+  });
 }
 
 function slotRow(slot, current, busy) {
@@ -283,21 +277,20 @@ function payoutsSection(rows, unattributed) {
     "<tbody>" + body + "</tbody></table></div></details>";
 }
 
-function proposedIndicator(s) {
-  const latest = (s.recent_decisions || [])[0];
-  const switchLike = latest && (latest.action === "SWITCH" || latest.action === "SWITCH_WHEN_IDLE");
-  const full = (switchLike && latest.target_model) ? String(latest.target_model) : "KEEP";
+function proposedIndicator(manager) {
+  const liveTarget = manager?.mode === "LIVE" && manager.fresh && manager.target_model !== manager.current_model;
+  const full = liveTarget && manager.target_model ? String(manager.target_model) : "KEEP";
   const shown = full.length <= 10 ? full : full.slice(0, 9) + "\u2026";
   return '<span class="badge proposed" role="status" title="' + esc(full) +
     '" aria-label="' + esc(full) + '">' + esc(shown) + SPAN_END;
 }
 
-function headHtml(s, host) {
+function headHtml(s, host, card) {
   const mode = s.mode || "OBSERVE";
   return '<div class="card-head"><h1>' + esc(host.label) + '</h1><span class="sub">' +
     esc(host.spec) + " · daemon " + fmtAge(s.as_of) + '</span><span class="head-flags">' +
     '<span class="badge ' + String(mode).toLowerCase() + '">' + esc(mode) + SPAN_END +
-    proposedIndicator(s) + SPAN_DIV_END;
+    proposedIndicator(card.manager) + SPAN_DIV_END;
 }
 
 export function errorCard(s, err) {
@@ -331,7 +324,7 @@ export function renderHost(s, servingWindow, hourlyHtml) {
   if (s?.error && !s.card) return errorCard(s, s.error);
   const p = hostCard(s);
   return '<div class="card ' + p.cls + '" data-host="' + esc(p.host.label) + '">' +
-    headHtml(s, p.host) + bandHtml(s, p.card) +
+    headHtml(s, p.host, p.card) + bandHtml(s, p.card) +
     '<div class="card-body">' + resourceRow(p.card) + gpuRow(p.card.gpu) +
     chipRow("loaded", p.loaded) + kpiGrid(s, p.card) +
     hostFolds(s, p.card, servingWindow, hourlyHtml) + DIV_END;

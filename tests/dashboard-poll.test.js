@@ -44,6 +44,8 @@ describe("dashboard poll and redraw", function () {
         fetch: okFetch({ hosts: [
           host("M3"),
           host("M1", { mode: "LIVE",
+            card: { ...host("M1").card, manager: {
+              mode: "LIVE", fresh: true, current_model: "gemma", target_model: "llama" } },
             recent_decisions: [{ action: "SWITCH", target_model: "llama", executed: false }] }),
         ] }),
         before: [cardStub("M3", foldsBefore, scrollsBefore)],
