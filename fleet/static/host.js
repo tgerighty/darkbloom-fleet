@@ -195,6 +195,12 @@ function shadowSection(fold, title, report) {
 
 function shadowSections(s, card) {
   const latest = (s.recent_decisions || [])[0] || {};
+  let observer = "";
+  if (card.manager_observer) {
+    const version = card.manager_observer.version ? " · v" + esc(card.manager_observer.version) : "";
+    observer = shadowSection("manager-observer", "Legacy manager observer · " +
+      esc(card.manager_observer.mode || "OBSERVE") + version, card.manager_observer);
+  }
   return shadowSection("demand-shadow", "Fleet demand shadow · OBSERVE", {
     current_model: latest.current_model, target_model: latest.target_model,
     action: actionLabel(latest, s.mode), reason: latest.reason, error: latest.error, as_of: latest.observed_at,
@@ -202,9 +208,7 @@ function shadowSections(s, card) {
     current_model: latest.current_model,
     target_model: (latest.payout_target_models || []).join(" + "), action: latest.payout_action,
     reason: latest.payout_reason, as_of: latest.observed_at,
-  }) + (card.manager_observer ? shadowSection("manager-observer", "Legacy manager observer · " +
-    esc(card.manager_observer.mode || "OBSERVE") + (card.manager_observer.version
-      ? " · v" + esc(card.manager_observer.version) : ""), card.manager_observer) : "");
+  }) + observer;
 }
 
 function slotRow(slot, current, busy) {
