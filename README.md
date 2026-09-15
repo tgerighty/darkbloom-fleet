@@ -45,8 +45,8 @@ happened and why.
   script.
 - **Its own dashboard.** A real web UI the service serves itself, not a
   page that needs anyone to keep it updated by hand. Each host renders as a
-  console-style card (status band, live model-manager report, separate demand, payout, and legacy
-  manager shadow reports, resource gauges, GPU memory bar,
+  console-style card (status band, live model-manager report, separate demand and payout shadow
+  reports, resource gauges, GPU memory bar,
   loaded/catalog chips, KPI tiles, a "Jobs · hourly buckets" terminal panel
   — one row per hour with a 40-letter per-model distribution bar over the
   last 24 h — backend slots, trust & attestation)

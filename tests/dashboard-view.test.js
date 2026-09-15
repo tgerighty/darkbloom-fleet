@@ -103,22 +103,15 @@ describe("no placeholder chrome", function () {
     expect(noStreak).toContain("qwen · 0/3 checks");
   });
 
-  it("renders separate demand, payout, and legacy observer panels", function () {
+  it("renders separate demand and payout shadow panels", function () {
     const decision = { ...SWITCH, payout_target_models: ["oss"], payout_action: "KEEP",
       payout_reason: "payout prefers current" };
-    const html = renderHost(host({ recent_decisions: [decision], card: { ...host().card,
-      manager_observer: { mode: "OBSERVE", version: "0.1.2", as_of: 1_700_000_000,
-        current_model: "gemma", target_model: "oss", reason: "oss ranks first" },
-    } }), "24h", "");
+    const html = renderHost(host({ recent_decisions: [decision] }), "24h", "");
     expect(html).toContain('data-fold="demand-shadow"');
     expect(html).toContain("Fleet demand shadow · OBSERVE");
     expect(html).toContain('data-fold="payout-shadow"');
     expect(html).toContain("Payout shadow · OBSERVE");
-    expect(html).toContain('data-fold="manager-observer"');
-    expect(html).toContain("Legacy manager observer · OBSERVE · v0.1.2");
-    expect(renderHost(host(), "24h", "")).not.toContain('data-fold="manager-observer"');
-    const incomplete = renderHost(host({ card: { ...host().card, manager_observer: {} } }), "24h", "");
-    expect(incomplete).toContain("Legacy manager observer · OBSERVE");
+    expect(html).not.toContain("Legacy manager observer");
   });
 
   it("omits console-only tiles, dummy gauges, idle note, catalog chips, and priority", function () {
@@ -235,11 +228,22 @@ describe("malformed host isolation", function () {
 });
 
 describe("proposed-action indicator", function () {
+  function withManager(target, current = "gemma", mode = "LIVE") {
+    return { ...host().card, manager: { mode: mode, fresh: true, current_model: current, target_model: target } };
+  }
   function head(html) {
     const start = html.indexOf("card-head");
     const band = html.indexOf('class="band');
     return html.slice(start, band);
   }
+
+  it("follows the live manager instead of the fleet shadow decision", function () {
+    const html = renderHost(host({ recent_decisions: [SWITCH], card: { ...host().card, manager: {
+      mode: "LIVE", fresh: true, current_model: "gemma", target_model: "oss",
+    } } }), "24h", "");
+    expect(head(html)).toContain('title="oss"');
+    expect(head(html)).not.toContain('title="llama"');
+  });
 
   it("shows KEEP under the mode badge when there is no switch proposal", function () {
     const html = renderHost(host(), "24h", "");
@@ -252,23 +256,28 @@ describe("proposed-action indicator", function () {
     expect(html).not.toContain("<button");
   });
 
-  it("shows KEEP for a non-switch decision", function () {
-    const html = renderHost(host({ recent_decisions: [{ ...SWITCH, action: "KEEP", target_model: "llama" }] }), "24h", "");
+  it("shows KEEP when the live manager recommends the current model", function () {
+    const html = renderHost(host({ recent_decisions: [SWITCH], card: withManager("gemma") }), "24h", "");
     expect(head(html)).toContain(">KEEP</span>");
     expect(head(html)).not.toContain("llama");
   });
 
-  it("shows the proposed target for SWITCH and SWITCH_WHEN_IDLE", function () {
-    const switched = renderHost(host({ recent_decisions: [SWITCH] }), "24h", "");
+  it("shows the live manager target only while the manager is live", function () {
+    const switched = renderHost(host({ card: withManager("llama") }), "24h", "");
     expect(head(switched)).toContain(">llama</span>");
     expect(head(switched)).toContain('title="llama"');
-    const idle = renderHost(host({ recent_decisions: [{ ...SWITCH, action: "SWITCH_WHEN_IDLE" }] }), "24h", "");
-    expect(head(idle)).toContain(">llama</span>");
+    const off = renderHost(host({ card: withManager("llama", "gemma", "OFF") }), "24h", "");
+    expect(head(off)).toContain(">KEEP</span>");
+    const stale = renderHost(host({ card: { ...withManager("llama"), manager: {
+      ...withManager("llama").manager, fresh: false } } }), "24h", "");
+    expect(head(stale)).toContain(">KEEP</span>");
+    const shadowOnly = renderHost(host({ recent_decisions: [SWITCH] }), "24h", "");
+    expect(head(shadowOnly)).toContain(">KEEP</span>");
   });
 
   it("truncates a long target and keeps the full name in title and aria-label", function () {
     const target = "gemma-4-26b-qat-4bit";
-    const html = renderHost(host({ recent_decisions: [{ ...SWITCH, target_model: target }] }), "24h", "");
+    const html = renderHost(host({ card: withManager(target) }), "24h", "");
     const hdr = head(html);
     expect(hdr).toContain(">" + target.slice(0, 9) + "…</span>");
     expect(hdr).toContain('title="' + target + '"');
@@ -278,7 +287,7 @@ describe("proposed-action indicator", function () {
 
   it("escapes an untrusted proposed target in text and attributes", function () {
     const target = 'x"><img src=x onerror="alert(1)';
-    const html = renderHost(host({ recent_decisions: [{ ...SWITCH, target_model: target }] }), "24h", "");
+    const html = renderHost(host({ card: withManager(target) }), "24h", "");
     const hdr = head(html);
     expect(hdr).toContain("title=\"x&quot;&gt;&lt;img src=x onerror=&quot;alert(1)\"");
     expect(hdr).toContain("aria-label=\"x&quot;&gt;&lt;img src=x onerror=&quot;alert(1)\"");

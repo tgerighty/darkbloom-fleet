@@ -55,9 +55,9 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     assert decision_id == 9
     assert pool.calls[0][1][:20] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0, None, None,
                                      "nominal", 0.41, 0.12, 1780.0, 62.5, 14.8, 1.2, 64.0)
-    assert pool.calls[0][1][-3].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
+    assert pool.calls[0][1][-2].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
                                          "mtp_active": False, "mtp_inactive_reason": "idle"}]
-    assert pool.calls[0][1][-2:] == (None, None)
+    assert pool.calls[0][1][-1] is None
     assert pool.calls[0][1][20:23] == (None, None, None)
     assert pool.calls[0][1][23] is None
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None,
@@ -132,14 +132,12 @@ def test_daemon_snapshots_persist_nullable_installed_models(fake_pool):
     assert "installed_models TEXT[] NOT NULL" not in db.SCHEMA_SQL
 
 
-def test_daemon_snapshots_persist_manager_reports(fake_pool):
+def test_daemon_snapshots_persist_manager_report(fake_pool):
     pool = fake_pool()
     daemon = DaemonState("m", ("m",), False, 1, 0.5, True,
-                         manager={"mode": "LIVE"}, manager_observer={"mode": "OBSERVE"})
+                         manager={"mode": "LIVE"})
     db.insert_daemon_snapshot(pool, "h", 1.0, daemon)
-    assert pool.calls[0][1][-2].obj == {"mode": "LIVE"}
-    assert pool.calls[0][1][-1].obj == {"mode": "OBSERVE"}
-    assert "manager_observer JSONB" in db.SCHEMA_SQL
+    assert pool.calls[0][1][-1].obj == {"mode": "LIVE"}
 
 
 def test_self_route_samples_record_an_empty_probe_too(fake_pool):
