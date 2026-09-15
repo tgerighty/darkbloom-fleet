@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from psycopg_pool import ConnectionPool
 
-from . import queries
+from . import hourly, queries
 from .config import Config
 from .scheduler import run_forever
 
@@ -74,6 +74,7 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
         statuses = await asyncio.gather(
             *(asyncio.to_thread(_status_row, cfg, pool, attributed, self_route) for cfg in configs)
         )
+        hourly.share_legends(statuses)
         return {"hosts": list(statuses)}
 
     return app

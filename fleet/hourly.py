@@ -105,3 +105,13 @@ def hourly_jobs(pool: ConnectionPool, hashes: list[str], now: float) -> Row:
         "legend": [{"letter": letters[m], "model": m} for m in sorted(totals)],
         "rows": _hour_rows(hours, newest, now, buckets, portions),
     }
+
+
+def share_legends(hosts: list[Row]) -> None:
+    """Use one ordered legend so model letters and colour slots match across hosts."""
+    panels = [host["hourly_jobs"] for host in hosts if host.get("hourly_jobs") is not None]
+    models = sorted({entry["model"] for panel in panels for entry in panel["legend"]})
+    letters = _assign_letters(models)
+    legend = [{"letter": letters[model], "model": model} for model in models]
+    for panel in panels:
+        panel["legend"] = legend

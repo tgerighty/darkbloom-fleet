@@ -168,3 +168,20 @@ def test_main_serves_every_host_from_one_pool_and_closes_it(monkeypatch):
 def test_main_binds_where_fleet_bind_host_says(monkeypatch):
     monkeypatch.setenv("FLEET_BIND_HOST", "0.0.0.0")
     assert ("run", "app", "0.0.0.0", 8080) in _run_main(monkeypatch)
+
+
+def test_status_shares_hourly_letters_and_colour_order_across_hosts(monkeypatch):
+    def build(cfg, *_args):
+        models = ['gpt-oss-20b', 'nvidia-nemotron-3.5-lightning'] if cfg.host_label == 'm1' else [
+            'gemma-4-26b-qat', 'gpt-oss-20b']
+        return {'hourly_jobs': {'legend': [{'model': m, 'letter': '?'} for m in models],
+                                'rows': [{'jobs': len(models), 'portions': models}]}}
+    _patch_status(monkeypatch, build)
+    app = web.create_app((SimpleNamespace(host_label='m3'), SimpleNamespace(host_label='m1')), object())
+    hosts = asyncio.run(_route(app, '/api/status').endpoint())['hosts']
+    expected = [{'model': 'gemma-4-26b-qat', 'letter': 'G'},
+                {'model': 'gpt-oss-20b', 'letter': 'O'},
+                {'model': 'nvidia-nemotron-3.5-lightning', 'letter': 'N'}]
+    assert hosts[0]['hourly_jobs']['legend'] == hosts[1]['hourly_jobs']['legend'] == expected
+    assert hosts[0]['hourly_jobs']['rows'][0]['portions'] == ['gemma-4-26b-qat', 'gpt-oss-20b']
+    assert hosts[1]['hourly_jobs']['rows'][0]['portions'] == ['gpt-oss-20b', 'nvidia-nemotron-3.5-lightning']
