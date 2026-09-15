@@ -45,7 +45,7 @@ happened and why.
   script.
 - **Its own dashboard.** A real web UI the service serves itself, not a
   page that needs anyone to keep it updated by hand. Each host renders as a
-  console-style card (status band, resource gauges, GPU memory bar,
+  console-style card (status band, live model-manager report, resource gauges, GPU memory bar,
   loaded/catalog chips, KPI tiles, a "Jobs · hourly buckets" terminal panel
   — one row per hour with a 40-letter per-model distribution bar over the
   last 24 h — backend slots, trust & attestation)
@@ -77,7 +77,8 @@ happened and why.
   metrics DB (`~/.darkbloom-widget/metrics.db` - thermal state, memory
   pressure, CPU, fan, peak temperature) plus the daemon's own `capacity`
   and `slots` sections; a missing or malformed widget row degrades to empty
-  card fields rather than failing the read. A second SSH command
+  card fields rather than failing the read. The same read includes the
+  `darkbloom-manager` state and its launch-service status. A second SSH command
   (`~/.darkbloom/bin/darkbloom models list --all --json`) lists on-disk
   models; scoring uses the intersection with `DARKBLOOM_HOST_<N>_MODELS`.
   A failed inventory read leaves daemon state intact and falls back to the

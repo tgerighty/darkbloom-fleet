@@ -24,13 +24,18 @@ DAEMON_STATE_PATH = "~/.darkbloom/daemon-state.json"
 DARKBLOOM_BIN = "~/.darkbloom/bin/darkbloom"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
 WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
+MANAGER_STATE_PATH = "~/.local/share/benbuschmann-darkbloom-manager/state.json"
 _WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
 # Printed between the two documents so one SSH round trip can carry both; the
 # daemon doc is JSON, so a distinctive marker line can never occur inside it.
 _DOC_SEPARATOR = "___fleet-docs___"
 _STATE_COMMAND = (
     f"cat {DAEMON_STATE_PATH} && printf '\\n{_DOC_SEPARATOR}\\n' && "
-    f"(sqlite3 {WIDGET_METRICS_DB_PATH} '{_WIDGET_LATEST_SQL}' || true)"
+    f"(sqlite3 {WIDGET_METRICS_DB_PATH} '{_WIDGET_LATEST_SQL}' || true) && "
+    f"printf '\\n{_DOC_SEPARATOR}\\n' && (cat {MANAGER_STATE_PATH} || true) && "
+    f"printf '\\n{_DOC_SEPARATOR}\\n' && "
+    "(launchctl print gui/$(id -u)/dev.darkbloom.warm-manager-live 2>/dev/null | "
+    "awk '$1 == \"state\" && $3 == \"running\" {print 1; exit}' || true)"
 )
 # Separate from _STATE_COMMAND: a slow or failed inventory read must not
 # stall or fail the daemon snapshot that freshness is judged from.
@@ -113,7 +118,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
     itself is unreadable — a missing or malformed widget row degrades to None
     fields. The caller decides how to degrade; this never fabricates a state."""
     raw = _run_ssh(cfg, _STATE_COMMAND, timeout=15)
-    daemon_raw, widget_raw = _split_documents(raw)
+    daemon_raw, widget_raw, manager_raw, manager_pid = _split_documents(raw)
     payload = json.loads(daemon_raw)
     widget = _widget_metrics(widget_raw)
     current_time = time.time() if now is None else now
@@ -145,6 +150,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         last_model_load_error_model=load_error[0],
         last_model_load_error_message=load_error[1],
         last_model_load_error_at=load_error[2],
+        manager=_manager_report(manager_raw, manager_pid),
     )
 
 
@@ -203,11 +209,37 @@ def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
     return tuple(dict.fromkeys(ids))
 
 
-def _split_documents(raw: str) -> tuple[str, str]:
-    """(daemon doc, widget doc) around the printf'd separator; no separator in
-    the output means no widget section at all."""
-    daemon, separator, widget = raw.partition(f"\n{_DOC_SEPARATOR}\n")
-    return daemon, widget if separator else ""
+def _split_documents(raw: str) -> tuple[str, str, str, str]:
+    """Daemon, widget, manager state, and live-manager PID from one SSH read."""
+    docs = raw.split(f"\n{_DOC_SEPARATOR}\n", 3)
+    return tuple((docs + ["", "", "", ""])[:4])
+
+
+def _manager_report(raw: str, pid: str) -> dict[str, object]:
+    running = pid.strip().isdigit()
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        state = None
+    if not isinstance(state, dict):
+        return {"running": running, "mode": "LIVE" if running else "OFF"}
+    return {
+        "running": running, "mode": "LIVE" if running else "OFF",
+        "version": _text(state.get("manager_version")),
+        "as_of": _optional_float(state, "last_decision_at"),
+        "current_model": _text(state.get("current_model")),
+        "target_model": _text(state.get("last_decision_target")),
+        "reason": _text(state.get("last_decision_reason")),
+        "challenger_model": _text(state.get("live_challenger_model")),
+        "streak": _optional_integer(state.get("live_challenger_streak")),
+    }
+
+
+def _optional_integer(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _widget_metrics(raw: str) -> dict[str, object]:

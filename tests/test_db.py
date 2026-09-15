@@ -55,8 +55,9 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     assert decision_id == 9
     assert pool.calls[0][1][:20] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0, None, None,
                                      "nominal", 0.41, 0.12, 1780.0, 62.5, 14.8, 1.2, 64.0)
-    assert pool.calls[0][1][-1].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
+    assert pool.calls[0][1][-2].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
                                          "mtp_active": False, "mtp_inactive_reason": "idle"}]
+    assert pool.calls[0][1][-1] is None
     assert pool.calls[0][1][20:23] == (None, None, None)
     assert pool.calls[0][1][23] is None
     assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None,

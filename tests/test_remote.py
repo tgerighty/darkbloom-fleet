@@ -10,10 +10,12 @@ from fleet.config import Config
 from fleet.types import DaemonState, Payout, Slot
 
 
-def _state_output(daemon_json: str, widget_json: str = "") -> str:
+def _state_output(daemon_json: str, widget_json: str = "", manager_json: str = "", manager_pid: str = "") -> str:
     """What _STATE_COMMAND's single SSH round trip prints: the daemon doc, the
     separator, then the widget's latest sample row (empty when absent)."""
-    return daemon_json + f"\n{remote._DOC_SEPARATOR}\n" + widget_json
+    return (daemon_json + f"\n{remote._DOC_SEPARATOR}\n" + widget_json +
+            f"\n{remote._DOC_SEPARATOR}\n" + manager_json +
+            f"\n{remote._DOC_SEPARATOR}\n" + manager_pid)
 
 
 def _cfg(live_execution: bool) -> Config:
@@ -81,7 +83,8 @@ def test_run_ssh_passes_an_explicit_key_and_reports_failures(monkeypatch):
 def test_fetch_daemon_state_parses_and_judges_freshness(monkeypatch):
     _capture(monkeypatch, _state_output('{"current_model": "a", "warm_models": ["a", ""], "inference_active": 1, '
                                         '"pid": "42", "started_at": 5, "written_at": 1000}'))
-    assert remote.fetch_daemon_state(_cfg(False), now=1050.0) == DaemonState("a", ("a",), True, 42, 5.0, True)
+    assert remote.fetch_daemon_state(_cfg(False), now=1050.0) == DaemonState(
+        "a", ("a",), True, 42, 5.0, True, manager={"running": False, "mode": "OFF"})
     assert remote.fetch_daemon_state(_cfg(False), now=2000.0).fresh is False
     assert remote.fetch_daemon_state(_cfg(False), now=900.0).fresh is False  # future-dated state is not fresh
 
@@ -93,6 +96,24 @@ def test_fetch_daemon_state_reads_advertised_models_and_the_request_counter(monk
     state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
     assert state.advertised_models == ("a", "b") and state.requests_served == 7
     assert (state.trust_level, state.trust_reason) == ("self_signed", "awaiting MDM verification")
+
+
+def test_fetch_daemon_state_reads_the_live_manager_report(monkeypatch):
+    manager = ('{"manager_version":"0.1.7","last_decision_at":1005,'
+               '"current_model":"gemma","last_decision_target":"qwen",'
+               '"last_decision_reason":"3 checks required","live_challenger_model":"qwen",'
+               '"live_challenger_streak":2}')
+    _capture(monkeypatch, _state_output('{"written_at":1000}', "", manager, "321"))
+    state = remote.fetch_daemon_state(_cfg(False), now=1010.0)
+    assert state.manager == {"running": True, "mode": "LIVE", "version": "0.1.7", "as_of": 1005.0,
+                             "current_model": "gemma", "target_model": "qwen",
+                             "reason": "3 checks required", "challenger_model": "qwen", "streak": 2}
+
+
+def test_missing_or_malformed_manager_state_is_reported_as_not_running(monkeypatch):
+    for raw in ("", "nope", "[]"):
+        _capture(monkeypatch, _state_output('{"written_at":1000}', "", raw, ""))
+        assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager == {"running": False, "mode": "OFF"}
 
 
 DAEMON_WITH_CAPACITY = ('{"current_model": "a", "warm_models": ["a"], "written_at": 1000, '

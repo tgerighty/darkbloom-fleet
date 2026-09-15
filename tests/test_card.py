@@ -20,6 +20,12 @@ def test_off_without_a_snapshot(fake_pool):
     assert built["kpis"]["started_at"] is None and built["kpis"]["tokens"] == 0
 
 
+def test_the_card_exposes_the_manager_report(fake_pool):
+    report = {"running": True, "mode": "LIVE", "version": "0.1.7", "reason": "keep warm"}
+    built = _card(fake_pool([{"tokens": 0, "requests": 0}]), _daemon(manager=report))
+    assert built["manager"] == report
+
+
 def test_stale_beats_trust_and_traffic(fake_pool):
     built = _card(fake_pool([{"tokens": 0, "requests": 0}]),
                   _daemon(fresh=False, inference_active=True))

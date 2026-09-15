@@ -56,6 +56,7 @@ class DaemonState:
     # Local-cache ids from `darkbloom models list --all --json`. None = unknown
     # this tick; () = verified empty. Presence of an id means on disk.
     installed_models: tuple[str, ...] | None = None
+    manager: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
