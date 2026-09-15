@@ -173,6 +173,17 @@ function servingSection(s, windowName) {
     "no model, or no data (1-minute samples)</div>" + renderServing(s.serving?.[windowName]) + FOLD_END;
 }
 
+function managerSection(manager) {
+  const m = manager || { mode: "OFF" };
+  const challenger = m.challenger_model && m.challenger_model !== m.current_model
+    ? '<div class="sub">challenger: ' + esc(m.challenger_model) + " · " + Number(m.streak || 0) + "/3 checks</div>"
+    : "";
+  return '<details class="fold" data-fold="manager"><summary>Model manager · ' + esc(m.mode || "OFF") +
+    (m.version ? " · v" + esc(m.version) : "") + '</summary><div class="sub">' +
+    esc(m.current_model || "–") + " → " + esc(m.target_model || "–") + " · " + fmtAge(m.as_of) +
+    "</div>" + challenger + '<div class="sub">' + esc(m.reason || "no report yet") + "</div></details>";
+}
+
 function slotRow(slot, current, busy) {
   const running = busy && slot.model === current;
   let mtp = "active";
@@ -282,7 +293,7 @@ function hostCard(s) {
 }
 
 function hostFolds(s, card, servingWindow, hourlyHtml) {
-  return servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
+  return managerSection(card.manager) + servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
     slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
     decisionsSection(s.recent_decisions || [], s.mode) +
     payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0);

@@ -82,6 +82,27 @@ describe("high-level band and chips", function () {
 });
 
 describe("no placeholder chrome", function () {
+  it("renders the per-host live manager report", function () {
+    const html = renderHost(host({ card: { ...host().card, manager: {
+      running: true, mode: "LIVE", version: "0.1.7", as_of: 1_700_000_000,
+      current_model: "gemma", target_model: "qwen", challenger_model: "qwen",
+      streak: 2, reason: "3 checks required",
+    } } }), "24h", "");
+    expect(html).toContain('data-fold="manager"');
+    expect(html).toContain("Model manager · LIVE");
+    expect(html).toContain("gemma → qwen");
+    expect(html).toContain("qwen · 2/3 checks");
+    expect(html).toContain("3 checks required");
+    const settled = renderHost(host({ card: { ...host().card, manager: {
+      current_model: "qwen", challenger_model: "qwen",
+    } } }), "24h", "");
+    expect(settled).not.toContain("challenger:");
+    const noStreak = renderHost(host({ card: { ...host().card, manager: {
+      current_model: "gemma", challenger_model: "qwen",
+    } } }), "24h", "");
+    expect(noStreak).toContain("qwen · 0/3 checks");
+  });
+
   it("omits console-only tiles, dummy gauges, idle note, catalog chips, and priority", function () {
     const html = renderHost(host(), "24h", "HOURLY");
     expect(html).not.toContain("console only");
