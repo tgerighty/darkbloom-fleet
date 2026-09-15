@@ -114,6 +114,8 @@ def test_missing_or_malformed_manager_state_is_reported_as_not_running(monkeypat
     for raw in ("", "nope", "[]"):
         _capture(monkeypatch, _state_output('{"written_at":1000}', "", raw, ""))
         assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager == {"running": False, "mode": "OFF"}
+    _capture(monkeypatch, _state_output('{"written_at":1000}', "", '{"live_challenger_streak":"bad"}', "1"))
+    assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager["streak"] == 0
 
 
 DAEMON_WITH_CAPACITY = ('{"current_model": "a", "warm_models": ["a"], "written_at": 1000, '
