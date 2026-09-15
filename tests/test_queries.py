@@ -236,13 +236,14 @@ def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
 def test_shared_status_data_is_attribution_plus_self_route(fake_pool):
     pool = fake_pool(
         [{"payout_rowid": 1, "provider_hash": "s1", "host": "m3"}],
+        [],
         [{"t": 100.0}],
         [{"model": "a", "routable_providers": 1}],
     )
     attributed, self_route = queries.shared_status_data(pool)
     assert attributed == {"s1": "m3"}
     assert self_route == (100.0, {"a": 1})
-    assert len(pool.calls) == 3
+    assert len(pool.calls) == 4
 
 
 def _host_cfg(hid):
@@ -255,6 +256,7 @@ def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     host_block = _status_responses([], [], [])
     pool = fake_pool(
+        [],
         [],
         [{"t": 1.0}],
         [{"model": "a", "routable_providers": 1}],

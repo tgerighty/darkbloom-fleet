@@ -4,6 +4,7 @@ warm_model_manager.py's fetch_output_prices() — stdlib only, no SSH needed.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
@@ -97,3 +98,27 @@ def fetch_output_prices(pricing_url: str) -> tuple[dict[str, float], float]:
 def resolve_prices(models: tuple[str, ...], prices: dict[str, float], fallback: float) -> dict[str, float]:
     """Apply the fallback price to any configured model without its own row."""
     return {m: prices.get(m, fallback) for m in models if prices.get(m, fallback) > 0}
+
+
+def fetch_provider_hashes(base_url: str, api_key: str, public_key: str) -> set[str]:
+    """Join this Mac's attestation to account payout identities, never job timing."""
+    if not public_key:
+        return set()
+    headers = {"Authorization": f"Bearer {api_key}"}
+    proof = _get_json(f"{base_url.rstrip('/')}/v1/providers/attestation", headers)
+    earnings = _get_json(f"{base_url.rstrip('/')}/v1/provider/account-earnings?limit=1000", headers)
+    if (not isinstance(proof, dict) or not isinstance(proof.get("providers"), list)
+            or not isinstance(earnings, dict) or not isinstance(earnings.get("earnings"), list)):
+        raise ValueError("provider identity response is malformed")
+    providers = {p["provider_id"] for p in proof["providers"]
+                 if isinstance(p, dict) and p.get("se_public_key") == public_key
+                 and isinstance(p.get("provider_id"), str) and p["provider_id"]}
+    hashes = set()
+    for payout in earnings["earnings"]:
+        if (not isinstance(payout, dict) or not isinstance(payout.get("provider_id"), str)
+                or payout["provider_id"] not in providers):
+            continue
+        key = payout.get("provider_key") or payout.get("provider_id")
+        if isinstance(key, str) and key:
+            hashes.add(hashlib.sha256(key.encode()).hexdigest())
+    return hashes

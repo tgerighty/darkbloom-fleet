@@ -70,3 +70,11 @@ def test_unattributed_recent_uses_the_account_wide_unique_ledger(fake_pool):
     assert "host = %s" not in sql
     assert "created_at <= %s" in sql
     assert params == (9.0, 50)
+
+
+def test_exact_identity_recovers_dual_host_jobs_and_overrides_wrong_votes(fake_pool):
+    rows = _vote_rows((1, 'm1', 'mac1'), (1, 'm1', 'mac2'), (2, 'm3', 'mac1'))
+    identities = [{'provider_hash': 'm1', 'host': 'mac1'}, {'provider_hash': 'm3', 'host': 'mac2'}]
+    assert attribution.provider_hosts(fake_pool(rows, identities)) == {'m1': 'mac1', 'm3': 'mac2'}
+    identities.append({'provider_hash': 'm3', 'host': 'mac1'})
+    assert attribution.provider_hosts(fake_pool(rows, identities)) == {'m1': 'mac1'}

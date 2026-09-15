@@ -84,6 +84,20 @@ def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
     db.insert_payouts(pool, host, payouts, now)
 
 
+def _ingest_provider_identity(cfg: Config, pool: ConnectionPool, daemon: DaemonState | None) -> None:
+    if not (cfg.api_key and daemon and daemon.fresh and daemon.attestation_public_key):
+        return
+    try:
+        hashes = demand.fetch_provider_hashes(cfg.base_url, cfg.api_key, daemon.attestation_public_key)
+        with pool.connection() as conn:
+            conn.cursor().executemany(
+                "INSERT INTO provider_identities (provider_hash, host) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                [(digest, cfg.host_id) for digest in sorted(hashes)],
+            )
+    except Exception:  # identity failure must not stop ingestion or expose authenticated responses
+        log.warning("provider payout identity unavailable for %s", cfg.host_id)
+
+
 def _probe_self_route(cfg: Config, pool: ConnectionPool, now: float) -> None:
     """Once per tick, from one host only (the view is account-wide): what the
     coordinator will route to on our machines. This is the penalty-box
@@ -203,6 +217,7 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     daemon, installed = _persist_tick_daemon(cfg, pool, host, now)
     _probe_self_route(cfg, pool, now)
     _ingest_earnings(cfg, pool, now)
+    _ingest_provider_identity(cfg, pool, daemon)
 
     current = daemon.current_model if daemon else None
     eligible = _eligible_models(cfg.models, installed)

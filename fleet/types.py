@@ -57,6 +57,7 @@ class DaemonState:
     # this tick; () = verified empty. Presence of an id means on disk.
     installed_models: tuple[str, ...] | None = None
     manager: dict[str, object] | None = None
+    attestation_public_key: str | None = None
 
 
 @dataclass(frozen=True)

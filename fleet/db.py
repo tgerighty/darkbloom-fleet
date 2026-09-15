@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS switch_lease (
     expires_at DOUBLE PRECISION NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS provider_identities (
+    provider_hash TEXT NOT NULL,
+    host TEXT NOT NULL,
+    PRIMARY KEY (provider_hash, host)
+);
 CREATE TABLE IF NOT EXISTS daemon_snapshots (
     id BIGSERIAL PRIMARY KEY,
     host TEXT NOT NULL,

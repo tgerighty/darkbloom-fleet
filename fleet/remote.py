@@ -127,6 +127,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
     gpu_active, gpu_cache, gpu_total = _capacity_gbs(payload)
     load_error = _model_load_error(payload)
     return DaemonState(
+        attestation_public_key=_text(payload.get("attestation_public_key")),
         current_model=_text(payload.get("current_model")),
         warm_models=_model_ids(payload, "warm_models"),
         inference_active=bool(payload.get("inference_active")),

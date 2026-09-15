@@ -2,9 +2,10 @@
 the `host` column on an earnings row names only whose copy we read, not who
 served the request. A payout's provider_hash names the provider *session*
 that earned it; this module maps each hash to the host whose daemon actually
-served it, by watching each host's own request counter (daemon_snapshots).
-Recomputed once per /api/status request — a handful of hashes a day, so no
-caching table (see progress.md).
+served it, using attestation identity joins. Historical sessions without an
+identity join fall back to each host's request counter (daemon_snapshots).
+Exact joins persist across provider restarts; counter votes are recomputed
+once per /api/status request.
 """
 from __future__ import annotations
 
@@ -81,12 +82,19 @@ def _attributed_from_votes(rows: list[Row]) -> dict[str, str]:
 
 
 def provider_hosts(pool: ConnectionPool) -> dict[str, str]:
-    """provider_hash -> the host that served it. Dual-host rises, ties, and
-    hashes with no votes stay unattributed (better to show no money than the
-    other machine's)."""
+    """Exact identities override counter votes; conflicting identities stay unassigned."""
     with pool.connection() as conn:
         rows = conn.execute(_VOTES_SQL).fetchall()
-    return _attributed_from_votes(rows)
+        identities = conn.execute("SELECT provider_hash, host FROM provider_identities").fetchall()
+    attributed = _attributed_from_votes(rows)
+    exact: dict[str, set[str]] = {}
+    for row in identities:
+        exact.setdefault(row["provider_hash"], set()).add(row["host"])
+    for provider_hash, hosts in exact.items():
+        attributed.pop(provider_hash, None)
+        if len(hosts) == 1:
+            attributed[provider_hash] = next(iter(hosts))
+    return attributed
 
 
 _UNATTRIBUTED_SQL = (
