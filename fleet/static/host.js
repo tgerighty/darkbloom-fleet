@@ -1,5 +1,5 @@
-import { esc } from "./ui.js?v=4";
-export { esc } from "./ui.js?v=4";
+import { esc } from "./ui.js?v=5";
+export { esc } from "./ui.js?v=5";
 
 const TD = "</td><td>";
 const TR = "<tr><td>";
@@ -184,6 +184,33 @@ function managerSection(manager) {
     "</div>" + challenger + '<div class="sub">' + esc(m.reason || "no report yet") + "</div></details>";
 }
 
+function shadowSection(fold, title, report) {
+  const r = report;
+  return '<details class="fold" data-fold="' + fold + '"><summary>' + title +
+    '</summary><div class="sub">' + esc(r.current_model || "–") + " → " +
+    esc(r.target_model || "–") + " · " + fmtAge(r.as_of) + '</div><div class="sub">' +
+    esc(r.action || "–") + " · " + esc(r.reason || "no report yet") +
+    (r.error ? ' <span class="err">' + esc(r.error) + SPAN_END : "") + "</div></details>";
+}
+
+function shadowSections(s, card) {
+  const latest = (s.recent_decisions || [])[0] || {};
+  let observer = "";
+  if (card.manager_observer) {
+    const version = card.manager_observer.version ? " · v" + esc(card.manager_observer.version) : "";
+    observer = shadowSection("manager-observer", "Legacy manager observer · " +
+      esc(card.manager_observer.mode || "OBSERVE") + version, card.manager_observer);
+  }
+  return shadowSection("demand-shadow", "Fleet demand shadow · OBSERVE", {
+    current_model: latest.current_model, target_model: latest.target_model,
+    action: actionLabel(latest, s.mode), reason: latest.reason, error: latest.error, as_of: latest.observed_at,
+  }) + shadowSection("payout-shadow", "Payout shadow · OBSERVE", {
+    current_model: latest.current_model,
+    target_model: (latest.payout_target_models || []).join(" + "), action: latest.payout_action,
+    reason: latest.payout_reason, as_of: latest.observed_at,
+  }) + observer;
+}
+
 function slotRow(slot, current, busy) {
   const running = busy && slot.model === current;
   let mtp = "active";
@@ -293,7 +320,8 @@ function hostCard(s) {
 }
 
 function hostFolds(s, card, servingWindow, hourlyHtml) {
-  return managerSection(card.manager) + servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
+  return managerSection(card.manager) + shadowSections(s, card) +
+    servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
     slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
     decisionsSection(s.recent_decisions || [], s.mode) +
     payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0);

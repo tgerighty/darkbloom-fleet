@@ -25,6 +25,7 @@ DARKBLOOM_BIN = "~/.darkbloom/bin/darkbloom"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
 WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
 MANAGER_STATE_PATH = "~/.local/share/benbuschmann-darkbloom-manager/state.json"
+MANAGER_OBSERVER_DB_PATH = "~/.darkbloom-widget/manager-observer/decisions.sqlite3"
 _WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
 # Printed between the two documents so one SSH round trip can carry both; the
 # daemon doc is JSON, so a distinctive marker line can never occur inside it.
@@ -35,7 +36,11 @@ _STATE_COMMAND = (
     f"printf '\\n{_DOC_SEPARATOR}\\n' && (cat {MANAGER_STATE_PATH} || true) && "
     f"printf '\\n{_DOC_SEPARATOR}\\n' && "
     "(launchctl print gui/$(id -u)/dev.darkbloom.warm-manager-live 2>/dev/null | "
-    "awk '$1 == \"state\" && $3 == \"running\" {print 1; exit}' || true)"
+    "awk '$1 == \"state\" && $3 == \"running\" {print 1; exit}' || true) && "
+    f"printf '\\n{_DOC_SEPARATOR}\\n' && "
+    f"(test -f {MANAGER_OBSERVER_DB_PATH} && "
+    "sqlite3 \"file:$HOME/.darkbloom-widget/manager-observer/decisions.sqlite3?mode=ro\" "
+    "'select json from decisions order by t desc limit 1' || true)"
 )
 # Separate from _STATE_COMMAND: a slow or failed inventory read must not
 # stall or fail the daemon snapshot that freshness is judged from.
@@ -118,7 +123,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
     itself is unreadable — a missing or malformed widget row degrades to None
     fields. The caller decides how to degrade; this never fabricates a state."""
     raw = _run_ssh(cfg, _STATE_COMMAND, timeout=15)
-    daemon_raw, widget_raw, manager_raw, manager_pid = _split_documents(raw)
+    daemon_raw, widget_raw, manager_raw, manager_pid, observer_raw = _split_documents(raw)
     payload = json.loads(daemon_raw)
     widget = _widget_metrics(widget_raw)
     current_time = time.time() if now is None else now
@@ -151,6 +156,7 @@ def fetch_daemon_state(cfg: Config, now: float | None = None) -> DaemonState:
         last_model_load_error_message=load_error[1],
         last_model_load_error_at=load_error[2],
         manager=_manager_report(manager_raw, manager_pid),
+        manager_observer=_manager_observer_report(observer_raw),
     )
 
 
@@ -209,10 +215,10 @@ def _parse_installed_model_ids(raw: str) -> tuple[str, ...] | None:
     return tuple(dict.fromkeys(ids))
 
 
-def _split_documents(raw: str) -> tuple[str, str, str, str]:
-    """Daemon, widget, manager state, and live-manager PID from one SSH read."""
-    docs = raw.split(f"\n{_DOC_SEPARATOR}\n", 3)
-    return tuple((docs + ["", "", "", ""])[:4])
+def _split_documents(raw: str) -> tuple[str, str, str, str, str]:
+    """Daemon, widget, live manager state/PID, and legacy observer report."""
+    docs = raw.split(f"\n{_DOC_SEPARATOR}\n", 4)
+    return tuple((docs + ["", "", "", "", ""])[:5])
 
 
 def _manager_report(raw: str, pid: str) -> dict[str, object]:
@@ -232,6 +238,26 @@ def _manager_report(raw: str, pid: str) -> dict[str, object]:
         "reason": _text(state.get("last_decision_reason")),
         "challenger_model": _text(state.get("live_challenger_model")),
         "streak": _optional_integer(state.get("live_challenger_streak")),
+    }
+
+
+def _manager_observer_report(raw: str) -> dict[str, object] | None:
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    state = _section(payload, "manager_state")
+    provenance = _section(payload, "provenance")
+    errors = _section(payload, "errors")
+    return {
+        "mode": "OBSERVE", "version": _text(provenance.get("manager_version")),
+        "as_of": _optional_float(payload, "t"),
+        "current_model": _text(state.get("current_model")),
+        "target_model": _text(state.get("last_decision_target")),
+        "reason": _text(state.get("last_decision_reason")),
+        "error": ", ".join(sorted(str(key) for key in errors)) or None,
     }
 
 

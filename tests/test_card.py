@@ -26,6 +26,12 @@ def test_the_card_exposes_the_manager_report(fake_pool):
     assert built["manager"] == report
 
 
+def test_the_card_exposes_the_legacy_manager_observer(fake_pool):
+    report = {"mode": "OBSERVE", "target_model": "gemma"}
+    built = _card(fake_pool([{"tokens": 0, "requests": 0}]), _daemon(manager_observer=report))
+    assert built["manager_observer"] == report
+
+
 def test_stale_beats_trust_and_traffic(fake_pool):
     built = _card(fake_pool([{"tokens": 0, "requests": 0}]),
                   _daemon(fresh=False, inference_active=True))

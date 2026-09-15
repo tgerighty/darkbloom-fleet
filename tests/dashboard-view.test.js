@@ -103,6 +103,24 @@ describe("no placeholder chrome", function () {
     expect(noStreak).toContain("qwen · 0/3 checks");
   });
 
+  it("renders separate demand, payout, and legacy observer panels", function () {
+    const decision = { ...SWITCH, payout_target_models: ["oss"], payout_action: "KEEP",
+      payout_reason: "payout prefers current" };
+    const html = renderHost(host({ recent_decisions: [decision], card: { ...host().card,
+      manager_observer: { mode: "OBSERVE", version: "0.1.2", as_of: 1_700_000_000,
+        current_model: "gemma", target_model: "oss", reason: "oss ranks first" },
+    } }), "24h", "");
+    expect(html).toContain('data-fold="demand-shadow"');
+    expect(html).toContain("Fleet demand shadow · OBSERVE");
+    expect(html).toContain('data-fold="payout-shadow"');
+    expect(html).toContain("Payout shadow · OBSERVE");
+    expect(html).toContain('data-fold="manager-observer"');
+    expect(html).toContain("Legacy manager observer · OBSERVE · v0.1.2");
+    expect(renderHost(host(), "24h", "")).not.toContain('data-fold="manager-observer"');
+    const incomplete = renderHost(host({ card: { ...host().card, manager_observer: {} } }), "24h", "");
+    expect(incomplete).toContain("Legacy manager observer · OBSERVE");
+  });
+
   it("omits console-only tiles, dummy gauges, idle note, catalog chips, and priority", function () {
     const html = renderHost(host(), "24h", "HOURLY");
     expect(html).not.toContain("console only");
@@ -293,6 +311,11 @@ describe("proposed-action indicator", function () {
     expect(page).toMatch(/pre\.hourly \{[^}]*box-sizing: border-box/);
     expect(page).toMatch(/pre\.hourly \{[^}]*max-width: 100%/);
   });
+
+  it("opens live demand by default", function () {
+    const page = readFileSync(new URL("../fleet/static/dashboard.html", import.meta.url), "utf8");
+    expect(page).toMatch(/<details class="fold" open>\s*<summary>Live demand \(network\)<\/summary>/);
+  });
 });
 
 describe("demand merge", function () {
@@ -302,5 +325,14 @@ describe("demand merge", function () {
     expect(rows).toHaveLength(1);
     const html = renderDemand(rows, [host(), host({ host: { label: "M1", spec: "Air" }, current_model: "other" })]);
     expect(html).toContain("gemma · M3");
+  });
+
+  it("hides retired Gemma shadow variants", function () {
+    const rows = mergeDemand([{ demand: [
+      { model: "gemma-4-26b", ema_score: 3 },
+      { model: "gemma-4-26b-8bit", ema_score: 2 },
+      { model: "gemma-4-26b-qat-4bit", ema_score: 1 },
+    ] }]);
+    expect(rows.map(function (row) { return row.model; })).toEqual(["gemma-4-26b-qat-4bit"]);
   });
 });

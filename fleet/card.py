@@ -133,4 +133,5 @@ def build_card(pool: ConnectionPool, host: str, daemon: Row | None,
         "slots": list(snapshot.get("slots") or []),
         "last_model_load_error": _load_error(snapshot, now),
         "manager": snapshot.get("manager"),
+        "manager_observer": snapshot.get("manager_observer"),
     }

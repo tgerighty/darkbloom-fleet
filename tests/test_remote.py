@@ -10,12 +10,14 @@ from fleet.config import Config
 from fleet.types import DaemonState, Payout, Slot
 
 
-def _state_output(daemon_json: str, widget_json: str = "", manager_json: str = "", manager_pid: str = "") -> str:
+def _state_output(daemon_json: str, widget_json: str = "", manager_json: str = "", manager_pid: str = "",
+                  observer_json: str = "") -> str:
     """What _STATE_COMMAND's single SSH round trip prints: the daemon doc, the
     separator, then the widget's latest sample row (empty when absent)."""
     return (daemon_json + f"\n{remote._DOC_SEPARATOR}\n" + widget_json +
             f"\n{remote._DOC_SEPARATOR}\n" + manager_json +
-            f"\n{remote._DOC_SEPARATOR}\n" + manager_pid)
+            f"\n{remote._DOC_SEPARATOR}\n" + manager_pid +
+            f"\n{remote._DOC_SEPARATOR}\n" + observer_json)
 
 
 def _cfg(live_execution: bool) -> Config:
@@ -116,6 +118,24 @@ def test_missing_or_malformed_manager_state_is_reported_as_not_running(monkeypat
         assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager == {"running": False, "mode": "OFF"}
     _capture(monkeypatch, _state_output('{"written_at":1000}', "", '{"live_challenger_streak":"bad"}', "1"))
     assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager["streak"] == 0
+
+
+def test_fetch_daemon_state_reads_the_legacy_observer_report(monkeypatch):
+    observer = ('{"t":1006,"provenance":{"manager_version":"0.1.2"},"manager_state":'
+                '{"current_model":"gemma","last_decision_target":"oss",'
+                '"last_decision_reason":"oss ranks first"},"errors":{}}')
+    _capture(monkeypatch, _state_output('{"written_at":1000}', observer_json=observer))
+    assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager_observer == {
+        "mode": "OBSERVE", "version": "0.1.2", "as_of": 1006.0,
+        "current_model": "gemma", "target_model": "oss", "reason": "oss ranks first", "error": None,
+    }
+    assert "test -f" in remote._STATE_COMMAND and "?mode=ro" in remote._STATE_COMMAND
+
+
+def test_missing_or_malformed_legacy_observer_report_is_omitted(monkeypatch):
+    for raw in ("", "nope", "[]"):
+        _capture(monkeypatch, _state_output('{"written_at":1000}', observer_json=raw))
+        assert remote.fetch_daemon_state(_cfg(False), now=1010.0).manager_observer is None
 
 
 DAEMON_WITH_CAPACITY = ('{"current_model": "a", "warm_models": ["a"], "written_at": 1000, '
