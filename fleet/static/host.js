@@ -277,6 +277,21 @@ function payoutsSection(rows, unattributed) {
     "<tbody>" + body + "</tbody></table></div></details>";
 }
 
+function latestJobsSection(earnings) {
+  const jobs = (earnings || []).slice(0, 5);
+  const rows = jobs.length ? jobs.map(function (job) {
+    return TR + fmtAge(job.created_at) + TD + esc(job.model) + TD +
+      num(job.completion_tokens, 0) + TD + "—" + TD +
+      "$" + num(job.micro_usd / 1e6, 6) + TR_END;
+  }).join("") : '<tr><td colspan="5"><i>No jobs recorded yet</i></td></tr>';
+  return '<details class="fold" open data-fold="latest-jobs"><summary>Last 5 jobs</summary>' +
+    '<div class="sub">Latest recorded payouts. TPS is unavailable: the earnings feed has no per-job timing.</div>' +
+    '<div class="scroll table-scroll" data-scroll="latest-jobs" tabindex="0" role="region" aria-label="Last 5 jobs">' +
+    '<table><thead><tr><th scope="col">When</th><th scope="col">Model</th>' +
+    '<th scope="col">Output tokens</th><th scope="col">TPS</th><th scope="col">Paid ($)</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div></details>';
+}
+
 function proposedIndicator(manager) {
   const liveTarget = manager?.mode === "LIVE" && manager.fresh && manager.target_model !== manager.current_model;
   const full = liveTarget && manager.target_model ? String(manager.target_model) : "KEEP";
@@ -315,7 +330,7 @@ function hostCard(s) {
 function hostFolds(s, card, servingWindow, hourlyHtml) {
   return managerSection(card.manager) + shadowSections(s, card) +
     servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
-    slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
+    latestJobsSection(s.recent_earnings) + slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
     decisionsSection(s.recent_decisions || [], s.mode) +
     payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0);
 }
