@@ -26,3 +26,15 @@ describe("last five jobs", () => {
     expect(renderHost({})).toContain("No jobs recorded yet");
   });
 });
+
+it("includes rewards in earnings labels but excludes them from jobs", () => {
+  const html = renderHost({ recent_earnings: [
+    {model: "base_reward", completion_tokens: 0, micro_usd: 2000},
+    {model: "nemotron", completion_tokens: 100, micro_usd: 30},
+  ]});
+  const start = html.indexOf('data-fold="latest-jobs"');
+  const panel = html.slice(start, html.indexOf("</details>", start));
+  expect(panel).not.toContain("base_reward");
+  expect(panel).toContain("nemotron");
+  expect(html).toContain("includes base rewards");
+});

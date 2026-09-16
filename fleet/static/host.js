@@ -124,8 +124,8 @@ function kpiGrid(s, card) {
     tile(k.requests, "requests", since) +
     tile(num(k.tokens, 0), "tokens", (k.token_requests || 0) + " payouts") +
     tile(fmtUp(k.started_at), "uptime") +
-    tile("$" + num(s.earnings_usd_1h, 4), "$ earned 1h") +
-    tile("$" + num(s.earnings_usd_24h, 2), "$ earned 24h") +
+    tile("$" + num(s.earnings_usd_1h, 4), "$ earned 1h", "includes base rewards") +
+    tile("$" + num(s.earnings_usd_24h, 2), "$ earned 24h", "includes base rewards") +
     tile(fmtAge(k.last_served_at), "last served") + DIV_END;
 }
 
@@ -219,7 +219,7 @@ function payoutsSection(rows, unattributed) {
 }
 
 function latestJobsSection(earnings) {
-  const jobs = (earnings || []).slice(0, 5);
+  const jobs = (earnings || []).filter(job => job.model !== "base_reward").slice(0, 5);
   const rows = jobs.length ? jobs.map(function (job) {
     return TR + fmtAge(job.created_at) + TD + esc(job.model) + TD +
       num(job.completion_tokens, 0) + TD + "—" + TD +

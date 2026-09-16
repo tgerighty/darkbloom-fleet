@@ -26,7 +26,7 @@ _HOURLY_SQL = (
     "model, count(*) AS n FROM ("
     + unique_payouts_sql(
         "created_at, model",
-        "created_at >= %s AND created_at <= %s AND provider_hash = ANY(%s)",
+        "created_at >= %s AND created_at <= %s AND provider_hash = ANY(%s) AND model != 'base_reward'",
     )
     + ") unique_payouts GROUP BY 1,2,3 ORDER BY 1 DESC"
 )

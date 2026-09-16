@@ -39,7 +39,7 @@ from pathlib import Path
 db = sqlite3.connect((Path.home() / {db_path!r}).expanduser().as_uri() + "?mode=ro", uri=True)
 rows = db.execute(
     "SELECT rowid, model, completion_tokens, micro_usd, created_at, provider_hash FROM payouts "
-    "WHERE rowid > ? AND model != 'base_reward' ORDER BY rowid", ({since_rowid},)
+    "WHERE rowid > ? ORDER BY rowid", ({since_rowid},)
 ).fetchall()
 print(json.dumps(rows))
 """

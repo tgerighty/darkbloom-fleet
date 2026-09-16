@@ -212,3 +212,22 @@ def test_malformed_last_model_load_error_degrades_to_nulls_and_keeps_the_read(mo
         assert state.current_model == "a"
         assert (state.last_model_load_error_model, state.last_model_load_error_message,
                 state.last_model_load_error_at) == expected
+
+
+def test_ledger_ingestion_includes_base_rewards(tmp_path, capsys):
+    import json
+    import sqlite3
+
+    ledger = tmp_path / "earnings.sqlite3"
+    with sqlite3.connect(ledger) as conn:
+        conn.execute("CREATE TABLE payouts (id INTEGER PRIMARY KEY, model TEXT, completion_tokens INTEGER, "
+                     "micro_usd INTEGER, created_at REAL, provider_hash TEXT)")
+        conn.executemany("INSERT INTO payouts VALUES (?,?,?,?,?,?)", [
+            (1, "base_reward", 0, 2000, 10.0, "m1"),
+            (2, "nemotron", 100, 30, 11.0, "m1"),
+            (3, "base_reward", 0, 1800, 12.0, "m3"),
+        ])
+    exec(remote._PAYOUTS_SNIPPET.format(db_path=str(ledger), since_rowid=0))
+    rows = json.loads(capsys.readouterr().out)
+    assert [row[0] for row in rows] == [1, 2, 3]
+    assert sum(row[3] for row in rows if row[5] == "m1") == 2030

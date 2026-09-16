@@ -120,3 +120,16 @@ remove, or warmup.
 Model manager 0.1.7 on each Mac owns model selection and switching.
 This service only collects data. The old fleet switch environment variables
 are no longer read. Historical shadow decisions remain in Postgres.
+
+## Earnings
+
+Per-machine earnings include inference payouts and base rewards, deduplicated
+by payout ID and attributed by provider session. Unassigned payouts are not
+included in either machine's total. Base rewards do not count as jobs or as
+evidence for request-counter attribution.
+
+When upgrading from a collector that excluded base rewards, replay each Mac's
+ledger once with `remote.fetch_new_payouts(cfg, 0)` and `db.insert_payouts`.
+The existing primary key makes this replay safe; normal incremental collection
+then includes new rewards. The replay restores only records still in the Mac's
+saved ledger.

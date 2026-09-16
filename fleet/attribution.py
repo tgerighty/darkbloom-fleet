@@ -22,7 +22,7 @@ Row = dict[str, object]
 _VOTES_SQL = """
 WITH payout AS (
     SELECT DISTINCT payout_rowid, provider_hash, created_at FROM earnings
-    WHERE provider_hash IS NOT NULL AND provider_hash <> ''
+    WHERE provider_hash IS NOT NULL AND provider_hash <> '' AND model != 'base_reward'
 ),
 pair AS (
     SELECT host, observed_at AS next_at, requests_served AS next_served, started_at AS next_started,

@@ -99,7 +99,7 @@ _SESSION_TOTALS_SQL = (
     "SELECT coalesce(sum(completion_tokens), 0) AS tokens, count(*) AS requests FROM ("
     + unique_payouts_sql(
         "completion_tokens",
-        "created_at > %s AND created_at <= %s AND provider_hash = ANY(%s)",
+        "created_at > %s AND created_at <= %s AND provider_hash = ANY(%s) AND model != 'base_reward'",
     )
     + ") unique_payouts"
 )
