@@ -29,9 +29,9 @@ def test_secret_files_reach_the_config(base_env, tmp_path):
 @pytest.mark.parametrize(("name", "value"), [
     ("FLEET_EMA_TAU_MINUTES", "0"),
     ("POLL_INTERVAL_SECONDS", "-1"),
-    ("FLEET_DECISION_HORIZON_SECONDS", "soon"),
-    ("FLEET_RELATIVE_MARGIN", "nan"),
-    ("FLEET_MIN_DWELL_SECONDS", "inf"),
+    ("POLL_INTERVAL_SECONDS", "soon"),
+    ("FLEET_EMA_TAU_MINUTES", "nan"),
+    ("FLEET_SWITCH_COST_SECONDS", "inf"),
 ])
 def test_invalid_numeric_settings_are_rejected(base_env, name, value):
     base_env.setenv(name, value)
@@ -40,9 +40,9 @@ def test_invalid_numeric_settings_are_rejected(base_env, name, value):
 
 
 def test_zero_is_allowed_where_it_means_something(base_env):
-    base_env.setenv("FLEET_MIN_DWELL_SECONDS", "0")
+    base_env.setenv("FLEET_SWITCH_COST_SECONDS", "0")
     (cfg,) = config.load_configs()
-    assert cfg.min_dwell_seconds == 0.0
+    assert cfg.switch_cost_seconds == 0.0
 
 
 def test_duplicate_host_labels_are_rejected(base_env):
@@ -97,7 +97,7 @@ def test_secret_filename_rejects_paths(base_env):
         config.load_configs()
 
 
-def test_per_host_live_execution_overrides_the_default(base_env):
+def test_retired_live_execution_settings_cannot_enable_switches(base_env):
     base_env.setenv("DARKBLOOM_HOST_1_LIVE_EXECUTION", "yes")
     (cfg,) = config.load_configs()
-    assert cfg.live_execution is True
+    assert not hasattr(cfg, "live_execution")

@@ -58,16 +58,6 @@ def earnings_usd(pool: ConnectionPool, since: float, now: float, hashes: list[st
     return float(row["total"]) / 1_000_000
 
 
-def recent_decisions(pool: ConnectionPool, host: str, limit: int = 20) -> list[Row]:
-    with pool.connection() as conn:
-        return conn.execute(
-            "SELECT observed_at, current_model, target_model, action, reason, mode, executed, error, "
-            "payout_target_models, payout_action, payout_reason "
-            "FROM decisions WHERE host = %s ORDER BY observed_at DESC LIMIT %s",
-            (host, limit),
-        ).fetchall()
-
-
 _RECENT_SQL = (
     "SELECT created_at, model, completion_tokens, micro_usd FROM ("
     + unique_payouts_sql(
@@ -221,7 +211,7 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
     routability = routability_panel(pool, host, daemon, cfg.switch_cost_seconds, self_route)
     return {
         "host": {"label": cfg.host_label, "spec": cfg.host_spec},
-        "mode": "LIVE" if cfg.live_execution else "OBSERVE",
+        "mode": "MONITOR",
         "current_model": daemon["current_model"] if daemon else None,
         "daemon_fresh": daemon["fresh"] if daemon else False,
         "inference_active": daemon["inference_active"] if daemon else None,
@@ -230,7 +220,6 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
         "earnings_usd_24h": round(earnings_usd(pool, now - DAY_SECONDS, now, hashes), 4),
         "earnings_usd_1h": round(earnings_usd(pool, now - 3600, now, hashes), 4),
         "serving": serving_percentages(pool, host, now),
-        "recent_decisions": recent_decisions(pool, host, limit=50),
         "recent_earnings": recent_earnings(pool, now, hashes),
         "unattributed_recent": unattributed_recent(pool, attributed, now),
         "routability": routability,

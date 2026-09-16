@@ -83,12 +83,11 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
 def _error_host(cfg: Config) -> queries.Row:
     return {
         "host": {"label": getattr(cfg, "host_label", "host"), "spec": getattr(cfg, "host_spec", "")},
-        "mode": "LIVE" if getattr(cfg, "live_execution", False) else "OBSERVE",
+        "mode": "MONITOR",
         "current_model": None,
         "inference_active": None,
         "as_of": None,
         "demand": [],
-        "recent_decisions": [],
         "recent_earnings": [],
         "serving": {},
         "card": None,

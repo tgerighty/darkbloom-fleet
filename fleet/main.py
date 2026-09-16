@@ -21,8 +21,7 @@ def main() -> None:
     db.init_schema(pool)
     log = logging.getLogger("fleet.main")
     for cfg in configs:
-        mode = "LIVE — switches will be executed" if cfg.live_execution else "OBSERVE — dry-run only, no switches will be executed"
-        log.info("starting in %s mode for host %r", mode, cfg.host_label)
+        log.info("starting read-only collection for host %r", cfg.host_label)
     app = create_app(configs, pool)
     try:
         uvicorn.run(app, host=os.environ.get("FLEET_BIND_HOST", "127.0.0.1"), port=configs[0].dashboard_port)

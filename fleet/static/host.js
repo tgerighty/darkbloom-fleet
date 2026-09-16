@@ -45,32 +45,6 @@ function tri(v) {
   if (v === null || v === undefined) return "unknown";
   return v ? "yes" : "–";
 }
-export function actionLabel(decision, mode) {
-  if (!decision?.action) return "";
-  const switchLike = decision.action === "SWITCH" || decision.action === "SWITCH_WHEN_IDLE";
-  if (String(mode || "").toUpperCase() === "OBSERVE" && switchLike && !decision.executed) {
-    return "would switch";
-  }
-  return decision.action;
-}
-
-function decisionBlock(s) {
-  const latest = (s.recent_decisions || [])[0];
-  if (!latest) return '<div class="band-sub">no decisions yet</div>';
-  const line = esc(latest.current_model || "–") + " → " + esc(latest.target_model || "–") +
-    " · " + esc(actionLabel(latest, s.mode)) + " · " + esc(latest.reason || "") +
-    " · " + fmtAge(latest.observed_at);
-  const err = latest.error ? '<div class="band-sub err">' + esc(latest.error) + "</div>" : "";
-  return '<div class="band-sub">' + line + "</div>" + payoutBlock(latest) + err;
-}
-
-function payoutBlock(decision) {
-  if (!decision.payout_action) return "";
-  return '<div class="band-sub">payout shadow: ' +
-    esc((decision.payout_target_models || []).join(" + ") || "–") + " · " +
-    esc(decision.payout_action) + " · " + esc(decision.payout_reason || "") + "</div>";
-}
-
 export function bandHtml(s, card) {
   const b = card?.status || { state: "OFF", tone: "grey", detail: "" };
   const model = s.current_model || "no model";
@@ -78,7 +52,7 @@ export function bandHtml(s, card) {
   return '<div class="band ' + (b.tone || "grey") + '"><div class="band-line"><span>' +
     esc(BANDS[b.state] || b.state) + '</span><span class="gvalue">' + esc(model) + " · " + busy +
     SPAN_DIV_END + '<div class="band-sub">' + esc(b.detail || "") + "</div>" +
-    loadErrorBlock(card) + decisionBlock(s) + "</div>";
+    loadErrorBlock(card) + "</div>";
 }
 
 function loadErrorBlock(card) {
@@ -184,27 +158,6 @@ function managerSection(manager) {
     "</div>" + challenger + '<div class="sub">' + esc(m.reason || "no report yet") + "</div></details>";
 }
 
-function shadowSection(fold, title, report) {
-  const r = report;
-  return '<details class="fold" data-fold="' + fold + '"><summary>' + title +
-    '</summary><div class="sub">' + esc(r.current_model || "–") + " → " +
-    esc(r.target_model || "–") + " · " + fmtAge(r.as_of) + '</div><div class="sub">' +
-    esc(r.action || "–") + " · " + esc(r.reason || "no report yet") +
-    (r.error ? ' <span class="err">' + esc(r.error) + SPAN_END : "") + "</div></details>";
-}
-
-function shadowSections(s, card) {
-  const latest = (s.recent_decisions || [])[0] || {};
-  return shadowSection("demand-shadow", "Fleet demand shadow · OBSERVE", {
-    current_model: latest.current_model, target_model: latest.target_model,
-    action: actionLabel(latest, s.mode), reason: latest.reason, error: latest.error, as_of: latest.observed_at,
-  }) + shadowSection("payout-shadow", "Payout shadow · OBSERVE", {
-    current_model: latest.current_model,
-    target_model: (latest.payout_target_models || []).join(" + "), action: latest.payout_action,
-    reason: latest.payout_reason, as_of: latest.observed_at,
-  });
-}
-
 function slotRow(slot, current, busy) {
   const running = busy && slot.model === current;
   let mtp = "active";
@@ -254,18 +207,6 @@ function trustSection(r) {
     "</tbody></table></details>";
 }
 
-function decisionsSection(decisions, mode) {
-  const rows = decisions.length ? decisions.map(function (d) {
-    return TR + fmtAge(d.observed_at) + TD + esc(d.current_model || "–") + TD +
-      esc(d.target_model || "–") + TD + esc(actionLabel(d, mode)) + (d.executed ? " ✓" : "") + TD +
-      esc(d.reason) + (d.error ? ' <span class="err">' + esc(d.error) + "</span>" : "") + TR_END;
-  }).join("") : "<tr><td colspan=5><i>no decisions yet</i></td></tr>";
-  return '<details class="fold" data-fold="decisions"><summary>Recent decisions</summary>' +
-    '<div class="scroll" data-scroll="decisions"><table>' +
-    "<thead><tr><th>when</th><th>current</th><th>target</th><th>action</th><th>reason</th></tr></thead>" +
-    "<tbody>" + rows + "</tbody></table></div></details>";
-}
-
 function payoutsSection(rows, unattributed) {
   const body = rows.length ? rows.map(function (e) {
     return TR + fmtAge(e.created_at) + TD + esc(e.model) + TD + e.completion_tokens + TD +
@@ -301,7 +242,7 @@ function proposedIndicator(manager) {
 }
 
 function headHtml(s, host, card) {
-  const mode = s.mode || "OBSERVE";
+  const mode = card.manager?.mode || "OFF";
   return '<div class="card-head"><h1>' + esc(host.label) + '</h1><span class="sub">' +
     esc(host.spec) + " · daemon " + fmtAge(s.as_of) + '</span><span class="head-flags">' +
     '<span class="badge ' + String(mode).toLowerCase() + '">' + esc(mode) + SPAN_END +
@@ -328,10 +269,9 @@ function hostCard(s) {
 }
 
 function hostFolds(s, card, servingWindow, hourlyHtml) {
-  return managerSection(card.manager) + shadowSections(s, card) +
+  return managerSection(card.manager) +
     servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
     latestJobsSection(s.recent_earnings) + slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
-    decisionsSection(s.recent_decisions || [], s.mode) +
     payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0);
 }
 

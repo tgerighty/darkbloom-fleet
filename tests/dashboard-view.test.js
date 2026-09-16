@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { actionLabel, bandHtml, errorCard, renderHost, renderHosts } from "../fleet/static/host.js";
+import { bandHtml, errorCard, renderHost, renderHosts } from "../fleet/static/host.js";
 import { mergeDemand, renderDemand } from "../fleet/static/ui.js";
 
 function host(over = {}) {
@@ -42,33 +42,22 @@ const SWITCH = {
 };
 
 describe("high-level band and chips", function () {
-  it("shows current model, idle, would-switch, and the decision error", function () {
+  it("shows current model and idle without historical shadow decisions", function () {
     const html = bandHtml(host({ recent_decisions: [{ ...SWITCH, payout_target_models: ["qwen", "oss"],
       payout_action: "KEEP", payout_reason: "insufficient payout evidence" }] }), host().card);
     expect(html).toContain("gemma");
     expect(html).toContain("idle");
-    expect(html).toContain("would switch");
-    expect(html).toContain("ranks first");
-    expect(html).toContain("ssh fail");
-    expect(html).toContain('class="band-sub err"');
-    expect(html).toContain("payout shadow: qwen + oss · KEEP · insufficient payout evidence");
+    expect(html).not.toContain("would switch");
+    expect(html).not.toContain("ranks first");
+    expect(html).not.toContain("ssh fail");
+    expect(html).not.toContain('class="band-sub err"');
+    expect(html).not.toContain("payout shadow: qwen + oss · KEEP · insufficient payout evidence");
     expect(html).toContain("TRUSTED — no request in 10 min");
     expect(html).not.toContain("priority:");
     expect(html).not.toContain("no traffic yet");
   });
 
-  it("labels only non-executed OBSERVE switch actions as would switch", function () {
-    expect(actionLabel(SWITCH, "OBSERVE")).toBe("would switch");
-    expect(actionLabel({ ...SWITCH, action: "SWITCH_WHEN_IDLE" }, "OBSERVE")).toBe("would switch");
-    expect(actionLabel({ ...SWITCH, executed: true }, "OBSERVE")).toBe("SWITCH");
-    expect(actionLabel(SWITCH, "LIVE")).toBe("SWITCH");
-    expect(actionLabel({ ...SWITCH, action: "KEEP" }, "OBSERVE")).toBe("KEEP");
-  });
 
-  it("renders an incomplete payout shadow safely", function () {
-    const html = bandHtml(host({ recent_decisions: [{ ...SWITCH, payout_action: "KEEP" }] }), host().card);
-    expect(html).toContain("payout shadow: – · KEEP · ");
-  });
 
   it("marks the current loaded chip while idle and serving", function () {
     const idle = renderHost(host(), "24h", "");
@@ -103,14 +92,16 @@ describe("no placeholder chrome", function () {
     expect(noStreak).toContain("qwen · 0/3 checks");
   });
 
-  it("renders separate demand and payout shadow panels", function () {
+  it("omits both retired shadow panels even if historical data is supplied", function () {
     const decision = { ...SWITCH, payout_target_models: ["oss"], payout_action: "KEEP",
       payout_reason: "payout prefers current" };
     const html = renderHost(host({ recent_decisions: [decision] }), "24h", "");
-    expect(html).toContain('data-fold="demand-shadow"');
-    expect(html).toContain("Fleet demand shadow · OBSERVE");
-    expect(html).toContain('data-fold="payout-shadow"');
-    expect(html).toContain("Payout shadow · OBSERVE");
+    expect(html).not.toContain('data-fold="demand-shadow"');
+    expect(html).not.toContain("Fleet demand shadow · OBSERVE");
+    expect(html).not.toContain('data-fold="payout-shadow"');
+    expect(html).not.toContain("Payout shadow · OBSERVE");
+    expect(html).not.toContain("Recent decisions");
+    expect(html).toContain("Model manager");
     expect(html).not.toContain("Legacy manager observer");
   });
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# A last_model_load_error this recent blocks a switch to that same model.
+# Mark recent model load errors in the dashboard.
 LOAD_ERROR_BLOCK_SECONDS = 120
 
 
@@ -68,27 +68,3 @@ class Payout:
     micro_usd: int
     created_at: float
     provider_hash: str | None = None  # provider session; identifies the serving host (see attribution.py)
-
-
-@dataclass(frozen=True)
-class Decision:
-    target: str | None
-    reason: str
-    action: str  # KEEP | SWITCH | SWITCH_WHEN_IDLE | WOULD_SWITCH | WAIT | BLOCKED
-    models: tuple[str, ...] = ()  # exact launch set; empty means target only
-
-
-@dataclass(frozen=True)
-class Guardrails:
-    relative_margin: float
-    absolute_margin: float
-    switch_cost_seconds: float
-    decision_horizon_seconds: float
-    min_dwell_seconds: float
-
-
-@dataclass(frozen=True)
-class Outcome:
-    mode: str  # live | observe
-    executed: bool
-    error: str | None

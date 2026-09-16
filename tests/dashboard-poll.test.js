@@ -34,7 +34,7 @@ describe("dashboard poll and redraw", function () {
     expect(forbidden.remove).toHaveBeenCalledTimes(2);
   });
 
-  it("renders both hosts, hourly rows, KEEP under OBSERVE, and restores fold scroll and window focus",
+  it("renders both hosts, hourly rows, manager status, and restores fold scroll and window focus",
     async function () {
       const foldsBefore = [fold("trust", true), fold("hourly", false)];
       const scrollsBefore = [scroller("payouts", 80)];
@@ -55,7 +55,7 @@ describe("dashboard poll and redraw", function () {
       const html = ctx.hosts.html();
       expect(html).toContain("data-host=\"M3\"");
       expect(html).toContain("data-host=\"M1\"");
-      expect(html).toContain(">OBSERVE</span>");
+      expect(html).toContain(">OFF</span>");
       expect(html).toContain(">LIVE</span>");
       expect(html).toContain(">KEEP</span>");
       expect(html).toContain(">llama</span>");

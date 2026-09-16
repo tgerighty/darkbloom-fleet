@@ -137,7 +137,7 @@ def _status_responses(daemon, demand, decisions, card_totals=None, hourly=None):
     decisions, earnings rows, unattributed recent hashes, the card's session
     payout totals, the hourly jobs buckets."""
     return [daemon, demand, [], [{"median": None, "n": 0}],
-            [{"total": 2_500_000}], [{"total": 500_000}], [], [], decisions,
+            [{"total": 2_500_000}], [{"total": 500_000}], [], [],
             [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}],
             [{"provider_hash": None}, {"provider_hash": "no-votes"}],
             card_totals or [{"tokens": 4_000, "requests": 2}],
@@ -155,12 +155,12 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     status = queries.build_status(
         SimpleNamespace(host_label="M3 label", host_id="m3", host_spec="M3 Max", live_execution=False,
                         switch_cost_seconds=300.0, daemon_freshness_seconds=90.0), pool, attributed, self_route)
-    assert status["host"] == {"label": "M3 label", "spec": "M3 Max"} and status["mode"] == "OBSERVE"
+    assert status["host"] == {"label": "M3 label", "spec": "M3 Max"} and status["mode"] == "MONITOR"
     assert status["current_model"] == "a" and status["daemon_fresh"] is True
     assert status["earnings_usd_24h"] == 2.5 and status["earnings_usd_1h"] == 0.5
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
-    assert status["recent_decisions"] == [{"action": "KEEP"}]
+    assert "recent_decisions" not in status
     hourly_jobs = status["hourly_jobs"]
     assert hourly_jobs["legend"] == [{"letter": "A", "model": "a"}]
     assert len(hourly_jobs["rows"]) == 24
@@ -228,7 +228,7 @@ def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     status = queries.build_status(SimpleNamespace(host_label="m1", host_id="m1", host_spec="?", live_execution=True,
                                                   switch_cost_seconds=300.0, daemon_freshness_seconds=90.0),
                                   pool, {}, (None, {}))
-    assert status["current_model"] is None and status["mode"] == "LIVE"
+    assert status["current_model"] is None and status["mode"] == "MONITOR"
     assert status["serving"]["1h"] == {"idle": 100.0} and status["demand"] == []
     assert status["card"]["status"]["state"] == "OFF" and status["card"]["kpis"]["tokens"] == 4_000
 

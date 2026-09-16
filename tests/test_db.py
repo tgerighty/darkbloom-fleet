@@ -1,5 +1,5 @@
 from fleet import db
-from fleet.types import CapacitySample, DaemonState, Decision, Outcome, Payout, Slot
+from fleet.types import CapacitySample, DaemonState, Payout, Slot
 
 
 def test_get_pool_uses_dict_rows(monkeypatch):
@@ -13,15 +13,6 @@ def test_init_schema_runs_the_schema(fake_pool):
     pool = fake_pool()
     db.init_schema(pool)
     assert pool.calls == [(db.SCHEMA_SQL, None)]
-
-
-def test_switch_lease_is_acquired_and_released_by_owner(fake_pool):
-    pool = fake_pool([{"owner": "h:1"}])
-    assert db.acquire_switch_lease(pool, "h:1", 1800.0) is True
-    db.release_switch_lease(pool, "h:1")
-    assert "clock_timestamp" in pool.calls[0][0]
-    assert pool.calls[0][1] == ("h:1", 1800.0)
-    assert pool.calls[1][1] == ("h:1",)
 
 
 def test_bulk_inserts_skip_empty_input(fake_pool):
@@ -44,15 +35,12 @@ def test_bulk_inserts_write_one_row_per_item(fake_pool):
     ]
 
 
-def test_daemon_snapshots_and_decisions_are_written(fake_pool):
+def test_daemon_snapshots_are_written(fake_pool):
     pool = fake_pool([], [{"id": 9}], [])
     daemon = DaemonState("m", ("m",), False, 42, 0.5, True, thermal_state="nominal", memory_pressure=0.41,
                          cpu_usage=0.12, fan_rpm=1780.0, peak_temperature_c=62.5, gpu_active_gb=14.8,
                          gpu_cache_gb=1.2, total_memory_gb=64.0, slots=(Slot("m", "paged", True, False, "idle"),))
     db.insert_daemon_snapshot(pool, "h", 1.0, daemon)
-    decision_id = db.insert_decision(pool, "h", 2.0, "m", Decision("n", "why", "SWITCH"), Outcome("live", False, None))
-    db.record_outcome(pool, decision_id, Outcome("live", True, None))
-    assert decision_id == 9
     assert pool.calls[0][1][:20] == ("h", 1.0, "m", ["m"], False, True, 42, 0.5, [], 0, None, None,
                                      "nominal", 0.41, 0.12, 1780.0, 62.5, 14.8, 1.2, 64.0)
     assert pool.calls[0][1][-2].obj == [{"model": "m", "kv_backend": "paged", "mtp_enabled": True,
@@ -60,46 +48,6 @@ def test_daemon_snapshots_and_decisions_are_written(fake_pool):
     assert pool.calls[0][1][-1] is None
     assert pool.calls[0][1][20:23] == (None, None, None)
     assert pool.calls[0][1][23] is None
-    assert pool.calls[1][1] == ("h", 2.0, "m", "n", "SWITCH", "why", "live", False, None,
-                                 None, None, None)
-    assert pool.calls[2][1] == ("live", True, None, 9)
-
-
-def test_decision_stores_payout_shadow_and_empty_hashes_skip_rate_query(fake_pool):
-    pool = fake_pool([{"id": 10}])
-    payout = Decision("b", "forecast", "SWITCH", ("b", "c"))
-
-    db.insert_decision(pool, "h", 2.0, "a", Decision("a", "keep", "KEEP"),
-                       Outcome("observe", False, None), payout)
-
-    assert pool.calls[0][1][-3:] == (["b", "c"], "SWITCH", "forecast")
-    assert db.payout_rates(pool, "h", 0.0, 1.0, []) == {}
-    assert len(pool.calls) == 1
-
-
-def test_payout_rates_normalize_attributed_earnings_by_warm_time(fake_pool):
-    pool = fake_pool([{"models": ["a", "b"], "micro_usd": 500_000, "warm_seconds": 7200.0}])
-
-    assert db.payout_rates(pool, "h", 100.0, 200.0, ["hash"]) == {("a", "b"): (0.25, 7200.0)}
-    sql, params = pool.calls[0]
-    assert "ARRAY(SELECT unnest(warm_models) ORDER BY 1)" in sql
-    assert "provider_hash = ANY" in sql
-    assert "created_at > snapshots.observed_at" in sql and "created_at <= snapshots.next_at" in sql
-    assert params == ("h", 100.0, 200.0, "h", 100.0, 200.0, 100.0, 100.0, 100.0, 200.0, ["hash"])
-
-
-def test_payout_confirmation_uses_the_oldest_unbroken_matching_target(fake_pool):
-    pool = fake_pool([{"observed_at": 190.0, "payout_target_models": ["b"]},
-                      {"observed_at": 100.0, "payout_target_models": ["b"]},
-                      {"observed_at": 90.0, "payout_target_models": ["c"]}])
-
-    assert db.payout_confirmation_started_at(pool, "h", ("b",), 0.0, 200.0, 120.0) == 100.0
-
-
-def test_payout_confirmation_stops_at_a_collection_gap(fake_pool):
-    pool = fake_pool([{"observed_at": 190.0, "payout_target_models": ["b"]},
-                      {"observed_at": 20.0, "payout_target_models": ["b"]}])
-    assert db.payout_confirmation_started_at(pool, "h", ("b",), 0.0, 200.0, 120.0) == 190.0
 
 
 def test_daemon_snapshots_persist_last_model_load_error(fake_pool):
@@ -151,8 +99,6 @@ def test_reads_fall_back_to_zero_when_the_tables_are_empty(fake_pool):
     pool = fake_pool([{"m": None}], [], [{"t": None}], [{"t": None}])
     assert db.last_payout_rowid(pool, "h") == 0
     assert db.load_ema(pool, "h") == ({}, 0.0)
-    assert db.dwell_anchor(pool, "h", 0.0) == 0.0
-    assert db.last_failed_switch_at(pool, "h") == 0.0
 
 
 def test_delete_ineligible_ema_drops_models_outside_the_set(fake_pool):
@@ -183,5 +129,3 @@ def test_reads_return_the_stored_values(fake_pool):
     pool = fake_pool([{"m": 12}], ema_rows, [{"t": 100.0}], [{"t": 50.0}])
     assert db.last_payout_rowid(pool, "h") == 12
     assert db.load_ema(pool, "h") == ({"a": 0.3, "b": 0.1}, 7.0)
-    assert db.dwell_anchor(pool, "h", 200.0) == 200.0
-    assert db.last_failed_switch_at(pool, "h") == 50.0

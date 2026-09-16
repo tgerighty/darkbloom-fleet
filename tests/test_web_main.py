@@ -88,7 +88,7 @@ def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch, caplog):
     assert body["hosts"][0] == {"host": {"label": "m3"}, "mode": "OBSERVE"}
     err = body["hosts"][1]
     assert err["host"] == {"label": "m1", "spec": "M1"}
-    assert err["demand"] == [] and err["recent_decisions"] == []
+    assert err["demand"] == [] and err["recent_earnings"] == []
     assert err["error"] == "status unavailable"
     assert "boom" not in str(err)
     assert "boom" in caplog.text

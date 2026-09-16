@@ -11,7 +11,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from .types import CapacitySample, DaemonState, Decision, Outcome, Payout
+from .types import CapacitySample, DaemonState, Payout
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS demand_samples (
@@ -165,24 +165,6 @@ def update_snapshot_installed_models(
         )
 
 
-def acquire_switch_lease(pool: ConnectionPool, owner: str, ttl_seconds: float) -> bool:
-    with pool.connection() as conn:
-        row = conn.execute(
-            "WITH clock AS (SELECT EXTRACT(EPOCH FROM clock_timestamp()) AS now) "
-            "INSERT INTO switch_lease (singleton, owner, expires_at) "
-            "SELECT true, %s, clock.now + %s FROM clock "
-            "ON CONFLICT (singleton) DO UPDATE SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at "
-            "WHERE switch_lease.expires_at < (SELECT now FROM clock) RETURNING owner",
-            (owner, ttl_seconds),
-        ).fetchone()
-    return bool(row and row["owner"] == owner)
-
-
-def release_switch_lease(pool: ConnectionPool, owner: str) -> None:
-    with pool.connection() as conn:
-        conn.execute("DELETE FROM switch_lease WHERE owner = %s", (owner,))
-
-
 def insert_daemon_snapshot(pool: ConnectionPool, host: str, observed_at: float, daemon: DaemonState) -> None:
     with pool.connection() as conn:
         conn.execute(
@@ -265,119 +247,4 @@ def save_ema(pool: ConnectionPool, host: str, ema: dict[str, float], updated_at:
             "INSERT INTO ema_state (host, model, value, updated_at) VALUES (%s,%s,%s,%s) "
             "ON CONFLICT (host, model) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
             rows,
-        )
-
-
-def dwell_anchor(pool: ConnectionPool, host: str, daemon_started_at: float) -> float:
-    """The later of: this service's last executed switch, or the daemon
-    process's own start time (an externally-triggered restart also resets
-    residency). 0 means "no anchor; nothing to protect yet"."""
-    with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT max(observed_at) AS t FROM decisions WHERE host = %s AND executed = true", (host,)
-        ).fetchone()
-    return max(row["t"] or 0.0, daemon_started_at or 0.0)
-
-
-def last_failed_switch_at(pool: ConnectionPool, host: str) -> float:
-    """Most recent SWITCH attempt that errored, for the restart-retry backoff."""
-    with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT max(observed_at) AS t FROM decisions WHERE host = %s AND action = 'SWITCH' AND error IS NOT NULL",
-            (host,),
-        ).fetchone()
-    return row["t"] or 0.0
-
-
-def insert_decision(pool: ConnectionPool, host: str, observed_at: float, current_model: str | None,
-                     decision: Decision, outcome: Outcome, payout: Decision | None = None) -> int:
-    payout_models = None
-    if payout:
-        payout_models = list(payout.models or ((payout.target,) if payout.target else ()))
-    with pool.connection() as conn:
-        row = conn.execute(
-            "INSERT INTO decisions (host, observed_at, current_model, target_model, action, reason, "
-            "mode, executed, error, payout_target_models, payout_action, payout_reason) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (host, observed_at, current_model, decision.target, decision.action, decision.reason,
-             outcome.mode, outcome.executed, outcome.error,
-             payout_models,
-             payout.action if payout else None, payout.reason if payout else None),
-        ).fetchone()
-    return int(row["id"])
-
-
-_PAYOUT_RATES_SQL = """
-WITH selected_snapshots AS (
-    SELECT observed_at, warm_models, fresh, trust_level FROM daemon_snapshots
-    WHERE host = %s AND observed_at >= %s AND observed_at <= %s
-    UNION ALL
-    (SELECT observed_at, warm_models, fresh, trust_level FROM daemon_snapshots
-     WHERE host = %s AND observed_at < %s ORDER BY observed_at DESC LIMIT 1)
-), raw_snapshots AS (
-    SELECT observed_at, warm_models, fresh, trust_level,
-           least(coalesce(lead(observed_at) OVER (ORDER BY observed_at), %s), observed_at + 600) AS next_at
-    FROM selected_snapshots
-), snapshots AS (
-    SELECT greatest(observed_at, %s) AS observed_at, next_at,
-           ARRAY(SELECT unnest(warm_models) ORDER BY 1) AS models
-    FROM raw_snapshots
-    WHERE fresh AND trust_level = 'hardware' AND next_at > greatest(observed_at, %s)
-), exposure AS (
-    SELECT models, sum(next_at - observed_at) AS warm_seconds FROM snapshots
-    GROUP BY 1
-), unique_payouts AS (
-        SELECT DISTINCT ON (payout_rowid) payout_rowid, micro_usd, created_at
-        FROM earnings
-        WHERE created_at > %s AND created_at <= %s AND provider_hash = ANY(%s)
-        ORDER BY payout_rowid, host
-), payout AS (
-    SELECT snapshots.models, sum(unique_payouts.micro_usd) AS micro_usd
-    FROM snapshots JOIN unique_payouts
-      ON unique_payouts.created_at > snapshots.observed_at
-     AND unique_payouts.created_at <= snapshots.next_at
-    GROUP BY snapshots.models
-)
-SELECT exposure.models, coalesce(payout.micro_usd, 0) AS micro_usd, exposure.warm_seconds
-FROM exposure LEFT JOIN payout USING (models)
-"""
-
-
-def payout_rates(pool: ConnectionPool, host: str, since: float, now: float,
-                 hashes: list[str]) -> dict[tuple[str, ...], tuple[float, float]]:
-    if not hashes:
-        return {}
-    with pool.connection() as conn:
-        rows = conn.execute(_PAYOUT_RATES_SQL,
-                            (host, since, now, host, since, now, since, since, since, now, hashes)).fetchall()
-    return {tuple(row["models"]): (float(row["micro_usd"]) / 1_000_000 * 3600 / float(row["warm_seconds"]),
-                                   float(row["warm_seconds"]))
-            for row in rows if float(row["warm_seconds"]) > 0}
-
-
-def payout_confirmation_started_at(pool: ConnectionPool, host: str,
-                                   models: tuple[str, ...], since: float, now: float,
-                                   max_gap: float) -> float:
-    with pool.connection() as conn:
-        rows = conn.execute(
-            "SELECT observed_at, payout_target_models FROM decisions WHERE host = %s AND observed_at >= %s "
-            "ORDER BY observed_at DESC", (host, since),
-        ).fetchall()
-    wanted = set(models)
-    started = now
-    newer = now
-    for row in rows:
-        observed_at = float(row["observed_at"])
-        if newer - observed_at > max_gap or set(row["payout_target_models"] or ()) != wanted:
-            break
-        started = observed_at
-        newer = observed_at
-    return started
-
-
-def record_outcome(pool: ConnectionPool, decision_id: int, outcome: Outcome) -> None:
-    with pool.connection() as conn:
-        conn.execute(
-            "UPDATE decisions SET mode = %s, executed = %s, error = %s WHERE id = %s",
-            (outcome.mode, outcome.executed, outcome.error, decision_id),
         )

@@ -8,6 +8,8 @@ instead of reading them from a local darkbloom CLI) has changed.
 """
 from __future__ import annotations
 
+import math
+
 from .types import CapacitySample
 
 
@@ -40,3 +42,13 @@ def compute_scores(
         for model, sample in samples.items()
         if model in prices
     }
+
+
+def update_ema(ema: dict[str, float], scores: dict[str, float], dt_seconds: float, tau_minutes: float) -> dict[str, float]:
+    """Exponential moving average of each model's score. dt_seconds since the
+    last update; alpha follows the standard tau-based EMA formula."""
+    alpha = 1 - math.exp(-dt_seconds / (tau_minutes * 60))
+    updated = dict(ema)
+    for model, score in scores.items():
+        updated[model] = score if model not in updated else updated[model] + alpha * (score - updated[model])
+    return updated

@@ -1,9 +1,4 @@
-"""SSH-based ingestion from the managed host. Read-only except execute_switch
-and the fast-switch watcher controls; all of those are gated by
-Config.live_execution except remove_fast_switch_target, the observe-mode
-stale-target cleanup. No hostnames or credentials live here — the SSH target
-and key path come from Config, which reads them from the environment.
-"""
+"""Read-only SSH ingestion of provider, manager, inventory, and earnings data."""
 from __future__ import annotations
 
 import json
@@ -11,16 +6,11 @@ import math
 import shlex
 import subprocess
 import time
-import urllib.parse
-import urllib.request
-from pathlib import Path
-
 from .config import Config
 from .types import DaemonState, Payout, Slot
 
 DAEMON_STATE_PATH = "~/.darkbloom/daemon-state.json"
-# Same binary the fast-switch watcher invokes as Path.home() / ".darkbloom" /
-# "bin" / "darkbloom". Bare `darkbloom` is not on non-interactive SSH PATH.
+# Bare `darkbloom` is not on the non-interactive SSH PATH.
 DARKBLOOM_BIN = "~/.darkbloom/bin/darkbloom"
 EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
 WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
@@ -42,49 +32,6 @@ _STATE_COMMAND = (
 _INVENTORY_COMMAND = f"{DARKBLOOM_BIN} models list --all --json"
 _MAX_INSTALLED_MODELS = 256
 _MAX_MODEL_ID_LENGTH = 256
-
-FAST_SWITCH_WATCHER_ASSET = Path(__file__).parent / "remote_assets" / "fast_switch_watcher.py"
-FAST_SWITCH_REMOTE_DIR = "~/.darkbloom-widget"
-FAST_SWITCH_SCRIPT_PATH = f"{FAST_SWITCH_REMOTE_DIR}/fast_switch_watcher.py"
-FAST_SWITCH_STATE_PATH = f"{FAST_SWITCH_REMOTE_DIR}/fleet-target.json"
-COLD_BOOT_SECONDS = 300
-REMOTE_WARMUP_SECONDS = 600
-REMOTE_POLL_SECONDS = COLD_BOOT_SECONDS + REMOTE_WARMUP_SECONDS + 60
-
-_LOCAL_WARMUP_SNIPPET = """
-import json, os, subprocess, time, urllib.request
-from urllib.parse import urlparse
-cli = os.path.expanduser("~/.darkbloom/bin/darkbloom")
-models = {models}
-deadline = time.monotonic() + {warmup_seconds}
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args, **_kwargs):
-        return None
-for _ in range(24):
-    try:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("local warm-up timed out")
-        local = json.loads(subprocess.check_output([cli, "local", "--json"]))
-        if urlparse(local["base_url"]).hostname not in ("127.0.0.1", "::1", "localhost"):
-            raise ValueError("local endpoint is not loopback")
-        for model in models:
-            body = json.dumps({{"model": model, "messages": [{{"role": "user", "content": "Reply OK."}}], "max_tokens": 1}}).encode()
-            request = urllib.request.Request(local["base_url"] + "/chat/completions", body, {{
-                "Authorization": "Bearer " + local["api_key"], "Content-Type": "application/json"}})
-            remaining = max(1, deadline - time.monotonic())
-            with urllib.request.build_opener(NoRedirect()).open(request, timeout=min(120, remaining)) as response:
-                response.read()
-        state = json.load(open(os.path.expanduser("~/.darkbloom/daemon-state.json")))
-        trust = state.get("trust") if isinstance(state.get("trust"), dict) else {{}}
-        if (set(state.get("warm_models") or ()) == set(models)
-                and trust.get("trust_level") == "hardware" and time.time() - float(state.get("written_at") or 0) <= 90):
-            break
-        time.sleep(min(5, max(0, deadline - time.monotonic())))
-    except (KeyError, OSError, subprocess.SubprocessError, TypeError, ValueError):
-        time.sleep(5)
-else:
-    raise SystemExit("local endpoint did not pass warm-up and daemon checks")
-"""
 
 _PAYOUTS_SNIPPET = """
 import json, sqlite3
@@ -164,19 +111,6 @@ def fetch_installed_models(cfg: Config) -> tuple[str, ...]:
     if ids is None:
         raise RuntimeError("installed-model inventory is malformed")
     return ids
-
-
-def fetch_model_memory(cfg: Config) -> dict[str, float]:
-    """Estimated resident GB from the installed-model inventory."""
-    raw = _run_ssh(cfg, _INVENTORY_COMMAND, timeout=20)
-    try:
-        models = json.loads(raw)["models"]
-        memory = {str(item["id"]): float(item["estimated_memory_gb"]) for item in models}
-    except (KeyError, TypeError, ValueError):
-        raise RuntimeError("installed-model memory inventory is malformed") from None
-    if not memory or any(not math.isfinite(value) or value <= 0 for value in memory.values()):
-        raise RuntimeError("installed-model memory inventory is malformed")
-    return memory
 
 
 def _installed_model_id(item: object) -> str | None:
@@ -331,167 +265,3 @@ def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
     rows = json.loads(raw)
     return [Payout(rowid=r[0], model=r[1], completion_tokens=r[2] or 0, micro_usd=r[3] or 0,
                    created_at=r[4], provider_hash=r[5] or None) for r in rows]
-
-
-def _checked_models(cfg: Config, target_models: str | tuple[str, ...]) -> tuple[str, ...]:
-    if not cfg.live_execution:
-        raise RuntimeError("refusing to execute a switch: FLEET_LIVE_EXECUTION is not enabled")
-    if not cfg.api_key:
-        raise RuntimeError("refusing to switch without a consumer API key for verification")
-    requested = (target_models,) if isinstance(target_models, str) else target_models
-    models = tuple(dict.fromkeys(requested))
-    if not models:
-        raise RuntimeError("refusing to switch without a target model")
-    return models
-
-
-def _cold_boot_launch(cfg: Config, models: tuple[str, ...]) -> tuple[str, str]:
-    model_args = " ".join(f"--model {shlex.quote(model)}" for model in models)
-    warmup = _LOCAL_WARMUP_SNIPPET.format(
-        models=json.dumps(models), warmup_seconds=REMOTE_WARMUP_SECONDS)
-    operation = (
-        "set -e\n"
-        "$HOME/.darkbloom/bin/darkbloom stop\n"
-        f"sleep {COLD_BOOT_SECONDS}\n"
-        f"$HOME/.darkbloom/bin/darkbloom start {model_args} --idle-timeout 0 --local-endpoint\n"
-        f"{shlex.quote(cfg.remote_python)} - <<'PY'\n{warmup}\nPY"
-    )
-    script = f"{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.sh"
-    status = f"{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.status"
-    pid_file = f"{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.pid"
-    launch = (
-        "set -e\n"
-        f"mkdir -p {FAST_SWITCH_REMOTE_DIR}\n"
-        f"rm -f {status}\n"
-        f"cat > {script}.tmp <<'SH'\n"
-        "#!/bin/sh\n"
-        f"status={status}\n"
-        f"pid_file={pid_file}\n"
-        "finish() { code=$?; rm -f \"$pid_file\"; printf '%s\\n' \"$code\" > \"$status.tmp\"; mv -f \"$status.tmp\" \"$status\"; }\n"
-        "trap finish EXIT\n"
-        f"{operation}\nSH\n"
-        f"mv -f {script}.tmp {script}\n"
-        f"nohup /bin/sh {script} </dev/null >{FAST_SWITCH_REMOTE_DIR}/fleet-cold-boot.log 2>&1 & "
-        f"echo $! > {pid_file}"
-    )
-    _run_ssh(cfg, launch, timeout=20)
-    return status, pid_file
-
-
-def _check_cold_boot_result(result: str) -> bool:
-    if not result:
-        return False
-    if result != "0":
-        raise RuntimeError(f"remote cold boot failed with exit {result}")
-    return True
-
-
-def _wait_for_cold_boot(cfg: Config, status: str, pid_file: str) -> None:
-    deadline = time.monotonic() + REMOTE_POLL_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            result = _run_ssh(cfg, f"test -f {status} && cat {status} || true", timeout=20).strip()
-        except RuntimeError:
-            time.sleep(5)
-            continue
-        if _check_cold_boot_result(result):
-            break
-        time.sleep(5)
-    else:
-        _run_ssh(
-            cfg,
-            f"pid=$(cat {pid_file} 2>/dev/null || true); "
-            "case \"$pid\" in ''|*[!0-9]*) exit 0;; esac; kill \"$pid\" 2>/dev/null || true",
-            timeout=20,
-        )
-        raise TimeoutError("remote cold boot did not finish")
-
-
-def execute_switch(cfg: Config, target_models: str | tuple[str, ...]) -> None:
-    """Run one checked, detached cold boot after the caller's safety gates."""
-    models = _checked_models(cfg, target_models)
-    clear_fast_switch_target(cfg)
-    status, pid_file = _cold_boot_launch(cfg, models)
-    _wait_for_cold_boot(cfg, status, pid_file)
-    for model in models:
-        _submit_api_warmup(cfg, model)
-
-
-def _submit_api_warmup(cfg: Config, target_model: str) -> None:
-    if urllib.parse.urlsplit(cfg.base_url).scheme != "https":
-        raise RuntimeError("refusing to send the consumer API key over a non-HTTPS URL")
-    body = json.dumps({
-        "model": target_model,
-        "messages": [{"role": "user", "content": "Reply OK."}],
-        "max_tokens": 1,
-    }).encode()
-    request = urllib.request.Request(
-        cfg.base_url.rstrip("/") + "/v1/chat/completions", body,
-        {"Authorization": "Bearer " + str(cfg.api_key), "Content-Type": "application/json",
-         "X-Darkbloom-Route": "self"},
-    )
-    opener = urllib.request.build_opener(_NoRedirect())
-    for attempt in range(3):
-        try:
-            with opener.open(request, timeout=120) as response:
-                response.read()
-            return
-        except OSError:
-            if attempt == 2:
-                raise
-            time.sleep(10)
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
-        return None
-
-
-def clear_fast_switch_target(cfg: Config) -> None:
-    """Live mode only. Removes the watcher's target, so a watcher still running
-    from an earlier tick can never act on a decision that no longer stands."""
-    if not cfg.live_execution:
-        raise RuntimeError("refusing to change the watcher target: FLEET_LIVE_EXECUTION is not enabled")
-    _run_ssh(cfg, f"rm -f {FAST_SWITCH_STATE_PATH}", timeout=15)
-
-
-def remove_fast_switch_target(cfg: Config) -> None:
-    """Unguarded counterpart to clear_fast_switch_target: the same plain rm -f,
-    allowed in observe mode so a target written by an earlier live tick is not
-    left behind for a still-running watcher to act on."""
-    _run_ssh(cfg, f"rm -f {FAST_SWITCH_STATE_PATH}", timeout=15)
-
-
-def launch_fast_switch_watcher(cfg: Config, target: str, max_seconds: float) -> None:
-    """Live mode only. Deploys fast_switch_watcher.py to the remote host and
-    launches it in the background (idempotent - safe to call every tick: the
-    watcher holds an exclusive lock, so a call while one is already running
-    just re-deploys the script/state and exits without a second poller). The
-    watcher re-reads its target from the state file written here each time
-    rather than a fixed argument, so it self-corrects if the recommendation
-    changes mid-wait. See collector.py and README for why this exists."""
-    if not cfg.live_execution:
-        raise RuntimeError("refusing to launch the fast-poll watcher: FLEET_LIVE_EXECUTION is not enabled")
-    script = FAST_SWITCH_WATCHER_ASSET.read_text()
-    state = json.dumps({
-        "target": target,
-        "valid_targets": list(cfg.models),
-        "max_seconds": max_seconds,
-        "restart_backoff_seconds": cfg.restart_backoff_seconds,
-        "daemon_freshness_seconds": cfg.daemon_freshness_seconds,
-        "written_at": time.time(),
-    })
-    script_tmp = f"{FAST_SWITCH_SCRIPT_PATH}.tmp"
-    state_tmp = f"{FAST_SWITCH_STATE_PATH}.tmp"
-    # set -e and rename-into-place: a failed write can never launch a stale
-    # script or leave a stale target behind.
-    remote_command = (
-        "set -e\n"
-        f"mkdir -p {FAST_SWITCH_REMOTE_DIR}\n"
-        f"cat > {script_tmp} <<'PY'\n{script}\nPY\n"
-        f"cat > {state_tmp} <<'JSON'\n{state}\nJSON\n"
-        f"mv -f {script_tmp} {FAST_SWITCH_SCRIPT_PATH}\n"
-        f"mv -f {state_tmp} {FAST_SWITCH_STATE_PATH}\n"
-        f"nohup {shlex.quote(cfg.remote_python)} {FAST_SWITCH_SCRIPT_PATH} </dev/null >/dev/null 2>&1 &"
-    )
-    _run_ssh(cfg, remote_command, timeout=20)

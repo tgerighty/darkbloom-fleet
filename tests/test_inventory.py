@@ -3,8 +3,7 @@ import json
 import logging
 
 from fleet import collector, remote
-from fleet.types import CapacitySample, DaemonState, Decision
-from tests.test_collector_tick import _boom, _live_daemon
+from fleet.types import CapacitySample, DaemonState
 
 DAEMON = DaemonState("a", ("a",), False, 1, 100.0, True)
 
@@ -70,9 +69,6 @@ def _stub_tick(monkeypatch, stored, *, installed, samples=None, prices=None, ema
         stored["loaded"] = True
         return ema_prev, 50.0
 
-    def act(cfg, pool, result, current, now, payout=None):
-        stored["act"] = (current, result)
-
     monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: DAEMON)
     monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: installed)
     monkeypatch.setattr(collector.db, "insert_daemon_snapshot",
@@ -87,8 +83,6 @@ def _stub_tick(monkeypatch, stored, *, installed, samples=None, prices=None, ema
     monkeypatch.setattr(collector.db, "load_ema", load_ema)
     monkeypatch.setattr(collector.db, "save_ema", save_ema)
     monkeypatch.setattr(collector.db, "insert_demand_samples", lambda *args: stored.setdefault("samples", True))
-    monkeypatch.setattr(collector, "_decide", lambda cfg, pool, ema, daemon, now: Decision("a", "keep", "KEEP"))
-    monkeypatch.setattr(collector, "_record_and_act", act)
 
 
 def test_unknown_inventory_falls_back_to_the_configured_allow_list(monkeypatch):
@@ -98,7 +92,6 @@ def test_unknown_inventory_falls_back_to_the_configured_allow_list(monkeypatch):
     assert stored["snapshot"].installed_models is None
     assert "installed_update" not in stored
     assert stored["loaded"] is True and "ema" in stored
-    assert stored["act"][1].action == "KEEP"
 
 
 def test_authoritative_empty_inventory_waits_without_advancing_ema(monkeypatch):
@@ -109,7 +102,6 @@ def test_authoritative_empty_inventory_waits_without_advancing_ema(monkeypatch):
     assert stored["installed_update"] == ()
     assert stored["deleted_ema"] == frozenset()
     assert "loaded" not in stored and "ema" not in stored and "samples" not in stored
-    assert stored["act"] == ("a", Decision(None, "no eligible installed models", "WAIT"))
 
 
 def test_configured_models_absent_from_disk_wait_without_enroling_disk_only(monkeypatch):
@@ -117,69 +109,27 @@ def test_configured_models_absent_from_disk_wait_without_enroling_disk_only(monk
     _stub_tick(monkeypatch, stored, installed=("disk-only",))
     collector.run_tick(_cfg(), None)
     assert "loaded" not in stored and "ema" not in stored
-    assert stored["act"][1] == Decision(None, "no eligible installed models", "WAIT")
     assert stored["installed_update"] == ("disk-only",)
 
 
 def test_scoring_uses_the_configured_on_disk_intersection(monkeypatch):
     stored = {}
-    seen = {}
 
-    def decide(cfg, pool, ema, daemon, now):
-        seen["ema"] = ema
-        return Decision("a", "keep", "KEEP")
 
     _stub_tick(monkeypatch, stored, installed=("a", "disk-only"))
-    monkeypatch.setattr(collector, "_decide", decide)
     collector.run_tick(_cfg(), None)
     assert stored["installed_update"] == ("a", "disk-only")
-    assert "a" in seen["ema"] and "b" not in seen["ema"] and "disk-only" not in seen["ema"]
+    assert "a" in stored["ema"] and "b" not in stored["ema"] and "disk-only" not in stored["ema"]
 
 
 def test_a_model_missing_from_disk_is_dropped_from_the_active_ema(monkeypatch):
     stored = {}
-    seen = {}
 
-    def decide(cfg, pool, ema, daemon, now):
-        seen["ema"] = ema
-        return Decision("a", "keep", "KEEP")
 
     _stub_tick(monkeypatch, stored, installed=("a",), ema_prev={"a": 0.1, "b": 9.0, "gone": 8.0})
-    monkeypatch.setattr(collector, "_decide", decide)
     collector.run_tick(_cfg(), None)
-    assert seen["ema"].keys() == {"a"}
     assert stored["ema"].keys() == {"a"}
-
-
-def test_maybe_execute_aborts_when_fresh_inventory_is_unknown(monkeypatch):
-    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
-    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: None)
-    monkeypatch.setattr(collector.remote, "execute_switch", _boom)
-    executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
-    assert executed is False and error is not None and "inventory" in error
-
-
-def test_maybe_execute_aborts_when_the_fresh_target_is_not_installed(monkeypatch):
-    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
-    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a",))
-    monkeypatch.setattr(collector.remote, "execute_switch", _boom)
-    executed, error = collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0)
-    assert executed is False and error is not None and "inventory" in error
-
-
-def test_maybe_execute_aborts_when_the_switch_target_is_absent(monkeypatch):
-    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
-    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a", "b"))
-    monkeypatch.setattr(collector.remote, "execute_switch", _boom)
-    executed, error = collector._maybe_execute(_cfg(), None, Decision(None, "r", "SWITCH"), 100.0)
-    assert executed is False and error is not None and "inventory" in error
-
-
-def test_maybe_execute_starts_when_fresh_inventory_contains_the_target(monkeypatch):
-    monkeypatch.setattr(collector, "_fetch_daemon", lambda cfg, now: _live_daemon())
-    monkeypatch.setattr(collector, "_fetch_installed", lambda cfg: ("a", "b"))
-    monkeypatch.setattr(collector.remote, "execute_switch", lambda cfg, target: None)
-    assert collector._maybe_execute(_cfg(), None, Decision("b", "r", "SWITCH"), 100.0) == (True, None)
+    assert stored["ema"].keys() == {"a"}
 
 
 def test_a_failing_inventory_read_is_logged_and_unknown(monkeypatch, caplog):
@@ -190,18 +140,3 @@ def test_a_failing_inventory_read_is_logged_and_unknown(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="fleet.collector"):
         assert collector._fetch_installed(_cfg()) is None
     assert "installed-model inventory unknown" in caplog.text
-
-
-def test_a_failing_memory_inventory_read_is_logged_and_unknown(monkeypatch, caplog):
-    monkeypatch.setattr(collector.remote, "fetch_model_memory", _boom)
-    assert collector._fetch_model_memory(_cfg()) is None
-    assert "memory inventory unknown" in caplog.text
-
-
-def test_a_64gb_host_waits_when_memory_inventory_is_unknown(monkeypatch):
-    monkeypatch.setattr(collector.db, "dwell_anchor", lambda pool, host, started: 0.0)
-    monkeypatch.setattr(collector.routability, "measured_switch_cost", lambda pool, host: None)
-    monkeypatch.setattr(collector, "_fetch_model_memory", lambda cfg: None)
-    result = collector._decide(_cfg(), None, {"a": 1, "b": 2},
-                               _live_daemon(total_memory_gb=64), 10_000.0)
-    assert result.action == "WAIT" and "memory inventory" in result.reason

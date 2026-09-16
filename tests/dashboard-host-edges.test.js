@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { actionLabel, errorCard, renderHost, renderHosts } from "../fleet/static/host.js";
+import { errorCard, renderHost, renderHosts } from "../fleet/static/host.js";
 
 const NOW = Math.floor(Date.now() / 1000);
 
@@ -17,6 +17,7 @@ function host(over = {}) {
     recent_earnings: [],
     unattributed_recent: 0,
     card: {
+      manager: { mode: "LIVE" },
       status: { state: "EARNING", tone: "green", detail: "busy" },
       resources: { thermal_state: "fair", memory_pressure: null, cpu_usage: undefined },
       gpu: { active_gb: 8, cache_gb: 2, total_gb: 20, peak_gb: 9 },
@@ -92,8 +93,7 @@ describe("host card edges", function () {
       expect(html).toContain("3 min");
       expect(html).toContain("never");
       expect(html).toContain("no probe data yet");
-      expect(html).toContain("KEEP ✓");
-      expect(html).toContain("–</td><td>–</td>");
+      expect(html).not.toContain("KEEP ✓");
       expect(html).toContain("$0.0015");
       expect(html).not.toContain("<button");
     });
@@ -121,7 +121,7 @@ describe("host card edges", function () {
       expect(missing).toContain("no slot data");
       expect(missing).toContain("configured 300 s");
       expect(missing).toContain("need 3");
-      expect(missing).toContain(">OBSERVE</span>");
+      expect(missing).toContain(">OFF</span>");
 
       const hours = renderHost(host({
         card: { ...host().card,
@@ -165,8 +165,6 @@ describe("host card edges", function () {
       expect(head(renderHost(host({ card: { ...host().card, manager: {
         mode: "LIVE", fresh: true, current_model: "gemma", target_model: eleven } } }), "24h", "")))
         .toContain(">" + eleven.slice(0, 9) + "…</span>");
-      expect(actionLabel(null, "LIVE")).toBe("");
-      expect(actionLabel({}, "LIVE")).toBe("");
     });
 
   it("escapes every remote string in text and attributes, including ampersand quote and backtick",
@@ -236,7 +234,7 @@ describe("host card edges", function () {
       card: { status: { state: "OFF", tone: "grey", detail: "" } },
     }, "24h", "");
     expect(html).toContain("data-host=\"host\"");
-    expect(html).toContain(">LIVE</span>");
+    expect(html).toContain(">OFF</span>");
     expect(html).toContain("OFF — no daemon snapshot");
     expect(html).toContain("none");
     expect(html).toContain("no slot data");
