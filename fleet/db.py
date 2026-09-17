@@ -14,6 +14,11 @@ from psycopg_pool import ConnectionPool
 from .types import CapacitySample, DaemonState, Payout
 
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS watch_state (
+    host TEXT PRIMARY KEY,
+    state JSONB NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS demand_samples (
     id BIGSERIAL PRIMARY KEY,
     host TEXT NOT NULL,

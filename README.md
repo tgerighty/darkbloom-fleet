@@ -36,3 +36,29 @@ See [CONFIG.md](CONFIG.md) for configuration and cluster deployment.
 This repository is public. Keep credentials and private host details in
 runtime environment variables or mounted secrets. SSH collection is read-only.
 The production dashboard requires Cloudflare Access.
+
+## Discord watch alerts
+
+The deployed fleet runs a read-only watcher for every configured Mac every
+30 seconds, independently of demand and earnings collection. It sends alerts
+to the existing cluster Alertmanager (`FLEET_ALERTMANAGER_URL`), which handles
+Discord delivery, grouping, repeat notifications and recovery messages.
+
+- `DarkbloomManagerSwitchFailed`: a pending switch has a command error or the
+  manager reports that automatic restart is blocked. Alerts on the next check.
+- `DarkbloomProviderUnavailable`: no running provider, a stale provider
+  heartbeat, or an unreachable machine for five continuous minutes.
+- `DarkbloomManagerUnavailable`: manager stopped or decisions stale for five
+  continuous minutes. An unreachable machine does not falsely clear this alert.
+
+The watcher checks launchd and state files over the existing SSH connection.
+It does not restart providers or interrupt inference. Timers and pending
+recovery notifications are stored in PostgreSQL and survive service restarts.
+A confirmed warm target clears an old switch error even before the manager
+updates its state. Brief outages do not notify. Alertmanager adds its normal
+notification grouping delay (currently 30 seconds for a new group).
+
+Unset `FLEET_ALERTMANAGER_URL` to disable notifications in local development.
+Planned maintenance can be silenced in Alertmanager using `cluster=darkbloom`
+and the Mac's `instance` label. These checks verify processes and heartbeats;
+they do not send inference requests or prove public API routing.

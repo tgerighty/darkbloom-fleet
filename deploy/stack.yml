@@ -72,6 +72,7 @@ services:
       # signed status payload (d-inference #825 / #870) and the node is never routed.
       DARKBLOOM_HOST_2_MODELS: gpt-oss-20b,gemma-4-26b-qat-4bit,qwen3-vl-30b-a3b-instruct,nvidia-nemotron-3.5-lightning,qwen3.5-35b-a3b,qwen3.6-35b-a3b-vl-mtp-mxfp8,gemma-4-26b,gemma-4-26b-8bit
       POLL_INTERVAL_SECONDS: "60"
+      FLEET_ALERTMANAGER_URL: http://shared-monitoring_shared-alertmanager:9093
       PYTHONDONTWRITEBYTECODE: "1"
       # The container's own interface; only the overlay networks reach it.
       FLEET_BIND_HOST: "0.0.0.0"
