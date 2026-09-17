@@ -139,11 +139,12 @@
   <section>
     <details class="fold" open>
       <summary>Live demand (network)</summary>
-      <div class="table-scroll"><table><thead><tr><th>model</th><th>active</th><th>warm</th><th>pressure</th><th>$/M</th><th>score</th><th>ema (20m)</th></tr></thead>
+      <div class="sub">Manager ranking: average pressure × (85% input + 15% output price) × weight. Eligible models only; each host uses its own samples. Missing or stale manager scores are omitted.</div>
+      <div class="table-scroll"><table><thead><tr><th>host</th><th>model</th><th>pressure</th><th>avg (5m)</th><th>blended $/M</th><th>weight</th><th>manager score</th></tr></thead>
       <tbody id="demand"></tbody></table></div>
     </details>
   </section>
   <div id="hosts" class="cards"></div>
-  <script type="module" src="/static/dashboard.js?v=11"></script>
+  <script type="module" src="/static/dashboard.js?v=12"></script>
 </body>
 </html>

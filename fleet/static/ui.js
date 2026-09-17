@@ -3,7 +3,6 @@ const TR = "<tr><td>";
 const FOLD_SEL = "details[data-fold]";
 const SCROLL_SEL = "[data-scroll]";
 const SERVING_WINDOW_ID = "serving-window";
-const HIDDEN_DEMAND_MODELS = new Set(["gemma-4-26b", "gemma-4-26b-8bit"]);
 
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" };
 export function esc(v) {
@@ -15,16 +14,16 @@ export function mergeDemand(hosts) {
   const byModel = new Map();
   (hosts || []).forEach(function (h) {
     (h.demand || []).forEach(function (r) {
-      if (HIDDEN_DEMAND_MODELS.has(r.model)) return;
-      const seen = byModel.get(r.model);
-      if (!seen || (r.observed_at || 0) > (seen.observed_at || 0)) byModel.set(r.model, r);
+      const key = (h.host?.label || "") + ":" + r.model;
+      const seen = byModel.get(key);
+      if (!seen || (r.observed_at || 0) > (seen.observed_at || 0)) byModel.set(key, { ...r, host_label: h.host?.label || "" });
     });
   });
-  return Array.from(byModel.values()).sort(function (a, b) { return (b.ema_score || 0) - (a.ema_score || 0); });
+  return Array.from(byModel.values()).sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
 }
 
 export function renderDemand(rows, hosts) {
-  if (!rows?.length) return '<tr><td colspan="7"><i>no demand samples yet</i></td></tr>';
+  if (!rows?.length) return '<tr><td colspan="7"><i>no fresh manager scores yet</i></td></tr>';
   const current = (hosts || []).map(function (h) {
     return { model: h.current_model, label: h.host?.label };
   }).filter(function (c) { return c.model && c.label; });
@@ -32,9 +31,9 @@ export function renderDemand(rows, hosts) {
     const marks = current.filter(function (c) { return c.model === r.model; })
       .map(function (c) { return c.label; });
     const model = esc(r.model) + (marks.length ? " · " + marks.map(esc).join(", ") : "");
-    return TR + model + TD + r.active_requests + TD + r.warm_providers + TD + num(r.pressure, 2) + TD +
-      num(r.output_usd_per_million, 2) + TD + num(r.score, 3) + "</td><td><b>" + num(r.ema_score, 3) +
-      "</b></td></tr>";
+    return TR + esc(r.host_label) + TD + model + TD + num(r.pressure, 2) + TD +
+      num(r.average_pressure, 2) + TD + num(r.blended_usd_per_million, 4) + TD +
+      num(r.weight, 2) + "</td><td><b>" + num(r.score, 3) + "</b></td></tr>";
   }).join("");
 }
 

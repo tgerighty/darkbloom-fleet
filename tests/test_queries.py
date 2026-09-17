@@ -273,3 +273,19 @@ def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
     assert len(vote_sql) == 1
     assert len(route_sql) == 2
     assert len(bounded_sql) == 2 and len(lifetime_sql) == 2
+
+
+def test_manager_ranking_uses_saved_blended_scores_and_rejects_stale_data():
+    snapshot = {"observed_at": 1000, "models": {
+        "qwen": {"eligible": True, "score": .079, "average_pressure": .35,
+                 "blended_usd_per_million": .1805, "weight": 1.25},
+        "oss": {"eligible": True, "score": .104, "average_pressure": 3.25,
+                "blended_usd_per_million": .032, "weight": 1},
+        "uninstalled": {"eligible": False, "score": 99},
+    }}
+    daemon = {"manager": {"score_snapshot": snapshot}}
+    rows = queries.manager_demand(daemon, [{"model": "qwen", "ema_score": 999}], 1010)
+    assert [r["model"] for r in rows] == ["oss", "qwen"]
+    assert rows[0]["blended_usd_per_million"] == .032
+    assert queries.manager_demand(daemon, [], 1181) == []
+    assert queries.manager_demand(None, [], 1010) == []

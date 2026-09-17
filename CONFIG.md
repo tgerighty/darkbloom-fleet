@@ -133,3 +133,9 @@ ledger once with `remote.fetch_new_payouts(cfg, 0)` and `db.insert_payouts`.
 The existing primary key makes this replay safe; normal incremental collection
 then includes new rewards. The replay restores only records still in the Mac's
 saved ledger.
+
+The demand table uses each Mac manager's saved score snapshot: average network
+pressure over five one-minute samples × blended token price (85% input, 15%
+output) × configured model weight. Rows are separate per host and include only
+eligible models. Snapshots older than three minutes are omitted. The table's
+ranking is before the manager's dwell, improvement, and switching-cost checks.

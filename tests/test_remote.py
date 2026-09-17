@@ -90,7 +90,7 @@ def test_fetch_daemon_state_reads_the_live_manager_report(monkeypatch):
     assert state.manager == {"running": True, "mode": "LIVE", "fresh": True,
                              "version": "0.1.7", "as_of": 1005.0,
                              "current_model": "gemma", "target_model": "qwen",
-                             "reason": "3 checks required", "challenger_model": "qwen", "streak": 2}
+                             "reason": "3 checks required", "challenger_model": "qwen", "streak": 2, "score_snapshot": None}
 
 
 def test_missing_or_malformed_manager_state_is_reported_as_not_running(monkeypatch):
@@ -231,3 +231,10 @@ def test_ledger_ingestion_includes_base_rewards(tmp_path, capsys):
     rows = json.loads(capsys.readouterr().out)
     assert [row[0] for row in rows] == [1, 2, 3]
     assert sum(row[3] for row in rows if row[5] == "m1") == 2030
+
+
+def test_manager_report_preserves_score_snapshot():
+    import json
+    snapshot = {"observed_at": 1000, "models": {"oss": {"eligible": True, "score": .104}}}
+    report = remote._manager_report(json.dumps({"last_score_snapshot": snapshot}), "321", 1001, 180)
+    assert report["score_snapshot"] == snapshot

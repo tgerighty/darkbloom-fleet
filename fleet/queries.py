@@ -4,6 +4,7 @@ writes so each file stays small and single-purpose.
 from __future__ import annotations
 
 import time
+import math
 from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
@@ -33,6 +34,35 @@ def latest_demand_table(pool: ConnectionPool, host: str) -> list[Row]:
             (host,),
         ).fetchall()
     return sorted(rows, key=lambda r: r["ema_score"] or 0, reverse=True)
+
+
+def manager_demand(daemon: Row | None, live_rows: list[Row], now: float) -> list[Row]:
+    """Use the manager's actual five-sample ranking, never the legacy fleet EMA."""
+    manager = (daemon or {}).get("manager") or {}
+    snapshot = manager.get("score_snapshot") or {}
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("models"), dict):
+        return []
+    observed = snapshot.get("observed_at")
+    if not isinstance(observed, (int, float)) or not 0 <= now - observed <= 180:
+        return []
+    live = {r["model"]: r for r in live_rows}
+    rows = []
+    for model, values in snapshot.get("models", {}).items():
+        if (not isinstance(values, dict) or not values.get("eligible")
+                or not isinstance(values.get("score"), (int, float))
+                or not math.isfinite(values["score"])):
+            continue
+        rows.append({
+            "model": model,
+            "active_requests": live.get(model, {}).get("active_requests"),
+            "warm_providers": live.get(model, {}).get("warm_providers"),
+            "pressure": values.get("now_pressure"),
+            "average_pressure": values.get("average_pressure"),
+            "blended_usd_per_million": values.get("blended_usd_per_million"),
+            "weight": values.get("weight"), "score": values["score"],
+            "observed_at": observed,
+        })
+    return sorted(rows, key=lambda r: r["score"], reverse=True)
 
 
 def latest_daemon(pool: ConnectionPool, host: str) -> Row | None:
@@ -206,7 +236,7 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
     host = cfg.host_id
     daemon = latest_daemon(pool, host)
     now = time.time()
-    demand = latest_demand_table(pool, host)
+    demand = manager_demand(daemon, latest_demand_table(pool, host), now)
     hashes = [h for h, owner in attributed.items() if owner == host]
     routability = routability_panel(pool, host, daemon, cfg.switch_cost_seconds, self_route)
     return {

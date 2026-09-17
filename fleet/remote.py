@@ -169,6 +169,7 @@ def _manager_report(raw: str, pid: str, now: float, freshness_seconds: float) ->
         "reason": _text(state.get("last_decision_reason")),
         "challenger_model": _text(state.get("live_challenger_model")),
         "streak": _optional_integer(state.get("live_challenger_streak")),
+        "score_snapshot": state.get("last_score_snapshot"),
     }
 
 

@@ -92,17 +92,17 @@ describe("overlapping refresh gate", function () {
 });
 
 describe("demand merge and escape", function () {
-  it("keeps the newest sample, sorts by ema, and escapes model marks", function () {
+  it("keeps the newest sample, sorts by manager score, and escapes model marks", function () {
     expect(esc(null)).toBe("");
     expect(esc(undefined)).toBe("");
     expect(mergeDemand()).toEqual([]);
     const older = { model: "a", ema_score: 9, observed_at: 1, active_requests: 0,
       warm_providers: 0, pressure: null, output_usd_per_million: undefined, score: 0 };
-    const newer = { ...older, ema_score: 1, observed_at: 5 };
+    const newer = { ...older, score: 1, observed_at: 5 };
     const rows = mergeDemand([
       { demand: [older] },
       { demand: [{ ...older, observed_at: 1 }, newer] },
-      { demand: [{ model: "b", ema_score: 3, observed_at: 1 }] },
+      { demand: [{ model: "b", score: 3, observed_at: 1 }] },
       { demand: undefined },
     ]);
     expect(rows[0].model).toBe("b");
@@ -200,4 +200,13 @@ describe("focus and restore edges", function () {
       expect(hit.focused).toBe(true);
       restoreFocus({}, { host: "M3", id: "", fold: "", tag: "" });
     });
+});
+
+it("keeps each host's manager ranking separate", () => {
+  const rows = mergeDemand([
+    { host: {label: "m1"}, demand: [{model: "oss", score: .1, observed_at: 100}] },
+    { host: {label: "m3"}, demand: [{model: "oss", score: .2, observed_at: 99}] },
+  ]);
+  expect(rows.map(r => [r.host_label, r.score])).toEqual([["m3", .2], ["m1", .1]]);
+  expect(renderDemand(rows, [])).toContain("m3");
 });
