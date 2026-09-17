@@ -28,7 +28,7 @@ def test_vote_sql_emits_one_row_per_payout_and_rising_host():
     sql = attribution._VOTES_SQL
     assert "payout_rowid" in sql
     assert "GROUP BY" not in sql
-    assert "next_served > s.prev_served" in sql
+    assert "nxt.requests_served > prev.requests_served" in sql
     assert "provider_hash <> ''" in sql
 
 

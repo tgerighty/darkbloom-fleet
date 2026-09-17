@@ -266,7 +266,7 @@ def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
     attributed, self_route = queries.shared_status_data(pool)
     queries.build_status(_host_cfg("m3"), pool, attributed, self_route)
     queries.build_status(_host_cfg("m1"), pool, attributed, self_route)
-    vote_sql = [sql for sql, _ in pool.calls if "next_served >" in sql]
+    vote_sql = [sql for sql, _ in pool.calls if sql == attribution._VOTES_SQL]
     route_sql = [sql for sql, _ in pool.calls if "self_route_samples" in sql]
     bounded_sql = [sql for sql, _ in pool.calls if "left_boundary" in sql]
     lifetime_sql = [sql for sql, _ in pool.calls if "LEAD(" in sql]

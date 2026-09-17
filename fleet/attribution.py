@@ -17,25 +17,29 @@ Row = dict[str, object]
 # snapshot interval containing that payout (prev is the greatest snapshot
 # strictly before the payout, next the first at or after it; same
 # started_at, else a restart would read as a rise). Both hosts hold the
-# same ledger rows, hence the DISTINCT. Dual-host rises stay in this
-# result; _attributed_from_votes drops them.
+# same ledger rows, hence the DISTINCT. Indexed lookups find the adjacent
+# snapshots without comparing every payout with every historical interval.
+# Known identities need no votes. Dual-host rises remain in this result;
+# _attributed_from_votes drops them.
 _VOTES_SQL = """
 WITH payout AS (
-    SELECT DISTINCT payout_rowid, provider_hash, created_at FROM earnings
+    SELECT DISTINCT payout_rowid, provider_hash, created_at FROM earnings e
     WHERE provider_hash IS NOT NULL AND provider_hash <> '' AND model != 'base_reward'
-),
-pair AS (
-    SELECT host, observed_at AS next_at, requests_served AS next_served, started_at AS next_started,
-           lag(observed_at) OVER w AS prev_at,
-           lag(requests_served) OVER w AS prev_served,
-           lag(started_at) OVER w AS prev_started
-    FROM daemon_snapshots
-    WINDOW w AS (PARTITION BY host ORDER BY observed_at)
-)
-SELECT p.payout_rowid AS payout_rowid, p.provider_hash AS provider_hash, s.host AS host
-FROM payout p JOIN pair s
-  ON s.prev_at < p.created_at AND p.created_at <= s.next_at
- AND s.prev_started = s.next_started AND s.next_served > s.prev_served
+      AND NOT EXISTS (SELECT 1 FROM provider_identities i WHERE i.provider_hash = e.provider_hash)
+), hosts AS (SELECT DISTINCT host FROM daemon_snapshots)
+SELECT p.payout_rowid, p.provider_hash, h.host
+FROM payout p CROSS JOIN hosts h
+JOIN LATERAL (
+    SELECT observed_at, requests_served, started_at FROM daemon_snapshots
+    WHERE host = h.host AND observed_at < p.created_at
+    ORDER BY observed_at DESC LIMIT 1
+) prev ON true
+JOIN LATERAL (
+    SELECT observed_at, requests_served, started_at FROM daemon_snapshots
+    WHERE host = h.host AND observed_at >= p.created_at
+    ORDER BY observed_at ASC LIMIT 1
+) nxt ON true
+WHERE prev.started_at = nxt.started_at AND nxt.requests_served > prev.requests_served
 """
 
 
