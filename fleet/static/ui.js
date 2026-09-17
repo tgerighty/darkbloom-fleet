@@ -23,7 +23,7 @@ export function mergeDemand(hosts) {
 }
 
 export function renderDemand(rows, hosts) {
-  if (!rows?.length) return '<tr><td colspan="7"><i>no fresh manager scores yet</i></td></tr>';
+  if (!rows?.length) return '<tr><td colspan="9"><i>no fresh manager scores yet</i></td></tr>';
   const current = (hosts || []).map(function (h) {
     return { model: h.current_model, label: h.host?.label };
   }).filter(function (c) { return c.model && c.label; });
@@ -31,7 +31,7 @@ export function renderDemand(rows, hosts) {
     const marks = current.filter(function (c) { return c.model === r.model; })
       .map(function (c) { return c.label; });
     const model = esc(r.model) + (marks.length ? " · " + marks.map(esc).join(", ") : "");
-    return TR + esc(r.host_label) + TD + model + TD + num(r.pressure, 2) + TD +
+    return TR + esc(r.host_label) + TD + model + TD + num(r.active_requests, 0) + TD + num(r.warm_providers, 0) + TD + num(r.pressure, 2) + TD +
       num(r.average_pressure, 2) + TD + num(r.blended_usd_per_million, 4) + TD +
       num(r.weight, 2) + "</td><td><b>" + num(r.score, 3) + "</b></td></tr>";
   }).join("");

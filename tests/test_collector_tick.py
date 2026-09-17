@@ -32,11 +32,11 @@ def test_fetch_daemon_returns_the_state_or_none(monkeypatch):
     assert collector._fetch_daemon(_cfg(), 0.0) is None
 
 
-def test_fetch_scores_keeps_configured_models_and_survives_feed_failures(monkeypatch):
+def test_fetch_scores_keeps_network_counts_and_survives_feed_failures(monkeypatch):
     samples = {"a": CapacitySample("a", 2, 1, 2.0), "zzz": CapacitySample("zzz", 1, 1, 1.0)}
     monkeypatch.setattr(collector.demand, "fetch_capacity", lambda url: samples)
     monkeypatch.setattr(collector.demand, "fetch_output_prices", lambda url: ({"a": 0.1}, 0.2))
-    assert collector._fetch_scores(_cfg()) == ({"a": samples["a"]}, {"a": 0.1, "b": 0.2})
+    assert collector._fetch_scores(_cfg()) == (samples, {"a": 0.1, "b": 0.2})
     monkeypatch.setattr(collector.demand, "fetch_capacity", _boom)
     monkeypatch.setattr(collector.demand, "fetch_output_prices", _boom)
     assert collector._fetch_scores(_cfg()) == ({}, {})

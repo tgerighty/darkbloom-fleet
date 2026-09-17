@@ -210,3 +210,9 @@ it("keeps each host's manager ranking separate", () => {
   expect(rows.map(r => [r.host_label, r.score])).toEqual([["m3", .2], ["m1", .1]]);
   expect(renderDemand(rows, [])).toContain("m3");
 });
+
+it("shows active requests and warm providers alongside manager scores", () => {
+  const html = renderDemand([{model: "oss", active_requests: 123, warm_providers: 45, score: .2}], []);
+  expect(html).toContain("</td><td>123</td><td>45</td>");
+  expect(html).toContain("<b>0.200</b>");
+});

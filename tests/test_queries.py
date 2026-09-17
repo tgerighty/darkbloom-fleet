@@ -284,8 +284,13 @@ def test_manager_ranking_uses_saved_blended_scores_and_rejects_stale_data():
         "uninstalled": {"eligible": False, "score": 99},
     }}
     daemon = {"manager": {"score_snapshot": snapshot}}
-    rows = queries.manager_demand(daemon, [{"model": "qwen", "ema_score": 999}], 1010)
+    rows = queries.manager_demand(daemon, [
+        {"model": "qwen", "ema_score": 999, "observed_at": 1000, "active_requests": 123, "warm_providers": 45},
+        {"model": "oss", "observed_at": 1, "active_requests": 999, "warm_providers": 999},
+    ], 1010)
     assert [r["model"] for r in rows] == ["oss", "qwen"]
     assert rows[0]["blended_usd_per_million"] == .032
+    assert rows[1]["active_requests"] == 123 and rows[1]["warm_providers"] == 45
+    assert rows[0]["active_requests"] is None and rows[0]["warm_providers"] is None
     assert queries.manager_demand(daemon, [], 1181) == []
     assert queries.manager_demand(None, [], 1010) == []

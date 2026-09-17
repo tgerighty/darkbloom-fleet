@@ -45,7 +45,8 @@ def manager_demand(daemon: Row | None, live_rows: list[Row], now: float) -> list
     observed = snapshot.get("observed_at")
     if not isinstance(observed, (int, float)) or not 0 <= now - observed <= 180:
         return []
-    live = {r["model"]: r for r in live_rows}
+    live = {r["model"]: r for r in live_rows
+            if isinstance(r.get("observed_at"), (int, float)) and 0 <= now - r["observed_at"] <= 180}
     rows = []
     for model, values in snapshot.get("models", {}).items():
         if (not isinstance(values, dict) or not values.get("eligible")

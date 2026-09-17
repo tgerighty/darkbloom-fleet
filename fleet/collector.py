@@ -56,7 +56,7 @@ def _fetch_scores(cfg: Config) -> tuple[dict[str, CapacitySample], dict[str, flo
     except Exception as error:  # noqa: BLE001
         log.warning("pricing feed unavailable: %s", error)
         prices = {}
-    return {m: s for m, s in samples.items() if m in cfg.models}, prices
+    return samples, prices
 
 
 def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
@@ -131,8 +131,8 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
         return
 
     samples, prices = _fetch_scores(cfg)
-    samples = {model: sample for model, sample in samples.items() if model in eligible}
-    scores = scoring.compute_scores(samples, prices, cfg.weights)
+    eligible_samples = {model: sample for model, sample in samples.items() if model in eligible}
+    scores = scoring.compute_scores(eligible_samples, prices, cfg.weights)
     if not scores:
         # No scored models this tick: leave the stored EMA and its timestamp
         # untouched (saving now would fake a fresh dt on the next real update)
