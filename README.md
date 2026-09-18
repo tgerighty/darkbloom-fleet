@@ -62,3 +62,21 @@ Unset `FLEET_ALERTMANAGER_URL` to disable notifications in local development.
 Planned maintenance can be silenced in Alertmanager using `cluster=darkbloom`
 and the Mac's `instance` label. These checks verify processes and heartbeats;
 they do not send inference requests or prove public API routing.
+
+### Earnings shadow evidence
+
+With `FLEET_EARNINGS_SHADOW=true`, every five minutes the fleet publishes
+`~/.darkbloom/fleet-earnings-profile.json` on each configured Mac. It uses the
+last 24 hours of allocated model time (including idle and observed loading
+failures), warm time, matching network pressure, and deduplicated inference
+payouts. Only unambiguous verified provider identities assign earnings to a
+machine. Base rewards and unknown identities are excluded; missing evidence
+must not be interpreted as a measured zero. Collection gaps over 90 seconds
+are excluded from allocation time. This is an observational baseline, not a
+controlled benchmark; delayed payouts and missing observations can affect it.
+
+The manager's optional `--earnings-profile` and `--earnings-host` arguments
+consume this evidence in shadow mode only. The fleet preserves its
+`earnings_shadow` report in manager snapshots and the status API for comparison
+with live decisions. No provider restart, model change or extra inference job
+is issued by the evidence publisher.

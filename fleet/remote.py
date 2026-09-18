@@ -170,6 +170,7 @@ def _manager_report(raw: str, pid: str, now: float, freshness_seconds: float) ->
         "challenger_model": _text(state.get("live_challenger_model")),
         "streak": _optional_integer(state.get("live_challenger_streak")),
         "score_snapshot": state.get("last_score_snapshot"),
+        "earnings_shadow": state.get("earnings_shadow"),
     }
 
 

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from psycopg_pool import ConnectionPool
 
-from . import hourly, queries, watch
+from . import earnings_shadow, hourly, queries, watch
 from .config import Config
 from .scheduler import run_forever
 
@@ -45,6 +45,7 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
         stop = asyncio.Event()
         tasks = [asyncio.create_task(run_forever(cfg, pool, stop)) for cfg in configs]
         tasks += [asyncio.create_task(watch.run_forever(cfg, pool, stop)) for cfg in configs]
+        tasks += [asyncio.create_task(earnings_shadow.run_forever(cfg, pool, stop)) for cfg in configs]
         try:
             yield
         finally:

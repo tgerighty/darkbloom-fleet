@@ -90,7 +90,7 @@ def test_fetch_daemon_state_reads_the_live_manager_report(monkeypatch):
     assert state.manager == {"running": True, "mode": "LIVE", "fresh": True,
                              "version": "0.1.7", "as_of": 1005.0,
                              "current_model": "gemma", "target_model": "qwen",
-                             "reason": "3 checks required", "challenger_model": "qwen", "streak": 2, "score_snapshot": None}
+                             "reason": "3 checks required", "challenger_model": "qwen", "streak": 2, "score_snapshot": None, "earnings_shadow": None}
 
 
 def test_missing_or_malformed_manager_state_is_reported_as_not_running(monkeypatch):
