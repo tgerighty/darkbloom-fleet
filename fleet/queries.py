@@ -46,6 +46,72 @@ def _manager_eligible_score(values: object) -> float | None:
     return float(score)
 
 
+def _score_snapshot(daemon: Row) -> tuple[dict[str, object], object]:
+    manager = daemon.get("manager") or {}
+    snapshot = manager.get("score_snapshot") if isinstance(manager, dict) else None
+    if not isinstance(snapshot, dict):
+        return {}, None
+    models = snapshot.get("models")
+    if not isinstance(models, dict):
+        models = {}
+    return models, snapshot.get("observed_at")
+
+
+def _snapshot_is_fresh(observed: object, now: float) -> bool:
+    return isinstance(observed, (int, float)) and 0 <= now - observed <= 180
+
+
+def _fresh_live_by_model(live_rows: list[Row], now: float) -> dict[str, Row]:
+    return {
+        r["model"]: r for r in live_rows
+        if isinstance(r.get("observed_at"), (int, float)) and 0 <= now - r["observed_at"] <= 180
+    }
+
+
+def _on_disk_model_ids(
+    daemon: Row, snapshot_models: dict[str, object], snapshot_fresh: bool,
+) -> list[str]:
+    installed = daemon.get("installed_models")
+    if isinstance(installed, (list, tuple)):
+        return [m for m in installed if isinstance(m, str) and m]
+    if not snapshot_fresh:
+        return []
+    return [
+        model for model, values in snapshot_models.items()
+        if _manager_eligible_score(values) is not None
+    ]
+
+
+def _demand_row(
+    model: str,
+    *,
+    snapshot_models: dict[str, object],
+    snapshot_fresh: bool,
+    observed: object,
+    live: dict[str, Row],
+) -> Row:
+    values = snapshot_models.get(model) if snapshot_fresh else None
+    score = _manager_eligible_score(values)
+    eligible = score is not None
+    values = values if isinstance(values, dict) else {}
+    live_row = live.get(model, {})
+    return {
+        "model": model,
+        "manager_eligible": eligible,
+        "active_requests": live_row.get("active_requests"),
+        "warm_providers": live_row.get("warm_providers"),
+        "pressure": values.get("now_pressure") if eligible else live_row.get("pressure"),
+        "average_pressure": values.get("average_pressure") if eligible else None,
+        "blended_usd_per_million": values.get("blended_usd_per_million") if eligible else None,
+        "weight": values.get("weight") if eligible else None,
+        "score": score,
+        "observed_prefill_tps": live_row.get("observed_prefill_tps"),
+        "observed_decode_tps": live_row.get("observed_decode_tps"),
+        "aggregate_tps": live_row.get("aggregate_tps"),
+        "observed_at": observed if snapshot_fresh else live_row.get("observed_at"),
+    }
+
+
 def manager_demand(daemon: Row | None, live_rows: list[Row], now: float) -> list[Row]:
     """Live demand for every on-disk model on this host.
 
@@ -54,59 +120,20 @@ def manager_demand(daemon: Row | None, live_rows: list[Row], now: float) -> list
     Does not widen collector --model eligibility used for EMA scoring.
     """
     daemon = daemon or {}
-    manager = daemon.get("manager") or {}
-    snapshot = manager.get("score_snapshot") if isinstance(manager, dict) else None
-    if not isinstance(snapshot, dict):
-        snapshot = {}
-    snapshot_models = snapshot.get("models")
-    if not isinstance(snapshot_models, dict):
-        snapshot_models = {}
-    observed = snapshot.get("observed_at")
-    snapshot_fresh = (
-        isinstance(observed, (int, float)) and 0 <= now - observed <= 180
-    )
-
-    live = {r["model"]: r for r in live_rows
-            if isinstance(r.get("observed_at"), (int, float)) and 0 <= now - r["observed_at"] <= 180}
-
-    installed = daemon.get("installed_models")
-    if isinstance(installed, (list, tuple)):
-        model_ids = [m for m in installed if isinstance(m, str) and m]
-    else:
-        # Inventory unknown this tick: preserve prior eligible-only behaviour.
-        if not snapshot_fresh:
-            return []
-        model_ids = [
-            model for model, values in snapshot_models.items()
-            if _manager_eligible_score(values) is not None
-        ]
-
-    rows: list[Row] = []
-    seen: set[str] = set()
-    for model in model_ids:
-        if model in seen:
-            continue
-        seen.add(model)
-        values = snapshot_models.get(model) if snapshot_fresh else None
-        score = _manager_eligible_score(values)
-        eligible = score is not None
-        values = values if isinstance(values, dict) else {}
-        live_row = live.get(model, {})
-        rows.append({
-            "model": model,
-            "manager_eligible": eligible,
-            "active_requests": live_row.get("active_requests"),
-            "warm_providers": live_row.get("warm_providers"),
-            "pressure": values.get("now_pressure") if eligible else live_row.get("pressure"),
-            "average_pressure": values.get("average_pressure") if eligible else None,
-            "blended_usd_per_million": values.get("blended_usd_per_million") if eligible else None,
-            "weight": values.get("weight") if eligible else None,
-            "score": score,
-            "observed_prefill_tps": live_row.get("observed_prefill_tps"),
-            "observed_decode_tps": live_row.get("observed_decode_tps"),
-            "aggregate_tps": live_row.get("aggregate_tps"),
-            "observed_at": observed if snapshot_fresh else live_row.get("observed_at"),
-        })
+    snapshot_models, observed = _score_snapshot(daemon)
+    snapshot_fresh = _snapshot_is_fresh(observed, now)
+    live = _fresh_live_by_model(live_rows, now)
+    model_ids = _on_disk_model_ids(daemon, snapshot_models, snapshot_fresh)
+    rows = [
+        _demand_row(
+            model,
+            snapshot_models=snapshot_models,
+            snapshot_fresh=snapshot_fresh,
+            observed=observed,
+            live=live,
+        )
+        for model in dict.fromkeys(model_ids)
+    ]
     return sorted(
         rows,
         key=lambda r: (r["score"] is not None, r["score"] or 0.0),
