@@ -29,41 +29,89 @@ def latest_demand_table(pool: ConnectionPool, host: str) -> list[Row]:
     with pool.connection() as conn:
         rows = conn.execute(
             "SELECT DISTINCT ON (model) model, active_requests, warm_providers, pressure, "
-            "output_usd_per_million, score, ema_score, observed_at "
+            "output_usd_per_million, score, ema_score, observed_at, "
+            "observed_prefill_tps, observed_decode_tps, aggregate_tps "
             "FROM demand_samples WHERE host = %s ORDER BY model, observed_at DESC",
             (host,),
         ).fetchall()
     return sorted(rows, key=lambda r: r["ema_score"] or 0, reverse=True)
 
 
+def _manager_eligible_score(values: object) -> float | None:
+    if not isinstance(values, dict) or not values.get("eligible"):
+        return None
+    score = values.get("score")
+    if not isinstance(score, (int, float)) or not math.isfinite(score):
+        return None
+    return float(score)
+
+
 def manager_demand(daemon: Row | None, live_rows: list[Row], now: float) -> list[Row]:
-    """Use the manager's actual five-sample ranking, never the legacy fleet EMA."""
-    manager = (daemon or {}).get("manager") or {}
-    snapshot = manager.get("score_snapshot") or {}
-    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("models"), dict):
-        return []
+    """Live demand for every on-disk model on this host.
+
+    Manager-eligible models keep their fresh score_snapshot ranking fields.
+    On-disk-only models are listed with live capacity/TPS when available.
+    Does not widen collector --model eligibility used for EMA scoring.
+    """
+    daemon = daemon or {}
+    manager = daemon.get("manager") or {}
+    snapshot = manager.get("score_snapshot") if isinstance(manager, dict) else None
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    snapshot_models = snapshot.get("models")
+    if not isinstance(snapshot_models, dict):
+        snapshot_models = {}
     observed = snapshot.get("observed_at")
-    if not isinstance(observed, (int, float)) or not 0 <= now - observed <= 180:
-        return []
+    snapshot_fresh = (
+        isinstance(observed, (int, float)) and 0 <= now - observed <= 180
+    )
+
     live = {r["model"]: r for r in live_rows
             if isinstance(r.get("observed_at"), (int, float)) and 0 <= now - r["observed_at"] <= 180}
-    rows = []
-    for model, values in snapshot.get("models", {}).items():
-        if (not isinstance(values, dict) or not values.get("eligible")
-                or not isinstance(values.get("score"), (int, float))
-                or not math.isfinite(values["score"])):
+
+    installed = daemon.get("installed_models")
+    if isinstance(installed, (list, tuple)):
+        model_ids = [m for m in installed if isinstance(m, str) and m]
+    else:
+        # Inventory unknown this tick: preserve prior eligible-only behaviour.
+        if not snapshot_fresh:
+            return []
+        model_ids = [
+            model for model, values in snapshot_models.items()
+            if _manager_eligible_score(values) is not None
+        ]
+
+    rows: list[Row] = []
+    seen: set[str] = set()
+    for model in model_ids:
+        if model in seen:
             continue
+        seen.add(model)
+        values = snapshot_models.get(model) if snapshot_fresh else None
+        score = _manager_eligible_score(values)
+        eligible = score is not None
+        values = values if isinstance(values, dict) else {}
+        live_row = live.get(model, {})
         rows.append({
             "model": model,
-            "active_requests": live.get(model, {}).get("active_requests"),
-            "warm_providers": live.get(model, {}).get("warm_providers"),
-            "pressure": values.get("now_pressure"),
-            "average_pressure": values.get("average_pressure"),
-            "blended_usd_per_million": values.get("blended_usd_per_million"),
-            "weight": values.get("weight"), "score": values["score"],
-            "observed_at": observed,
+            "manager_eligible": eligible,
+            "active_requests": live_row.get("active_requests"),
+            "warm_providers": live_row.get("warm_providers"),
+            "pressure": values.get("now_pressure") if eligible else live_row.get("pressure"),
+            "average_pressure": values.get("average_pressure") if eligible else None,
+            "blended_usd_per_million": values.get("blended_usd_per_million") if eligible else None,
+            "weight": values.get("weight") if eligible else None,
+            "score": score,
+            "observed_prefill_tps": live_row.get("observed_prefill_tps"),
+            "observed_decode_tps": live_row.get("observed_decode_tps"),
+            "aggregate_tps": live_row.get("aggregate_tps"),
+            "observed_at": observed if snapshot_fresh else live_row.get("observed_at"),
         })
-    return sorted(rows, key=lambda r: r["score"], reverse=True)
+    return sorted(
+        rows,
+        key=lambda r: (r["score"] is not None, r["score"] or 0.0),
+        reverse=True,
+    )
 
 
 def latest_daemon(pool: ConnectionPool, host: str) -> Row | None:

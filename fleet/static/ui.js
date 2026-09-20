@@ -22,8 +22,15 @@ export function mergeDemand(hosts) {
   return Array.from(byModel.values()).sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
 }
 
+function demandScopeBadge(eligible) {
+  if (eligible) {
+    return '<span class="sbadge run" title="Manager-eligible for live --model switching">eligible</span>';
+  }
+  return '<span class="sbadge idle" title="On disk only; not in manager eligibility">on-disk</span>';
+}
+
 export function renderDemand(rows, hosts) {
-  if (!rows?.length) return '<tr><td colspan="9"><i>no fresh manager scores yet</i></td></tr>';
+  if (!rows?.length) return '<tr><td colspan="10"><i>no on-disk models or fresh demand yet</i></td></tr>';
   const current = (hosts || []).map(function (h) {
     return { model: h.current_model, label: h.host?.label };
   }).filter(function (c) { return c.model && c.label; });
@@ -31,7 +38,8 @@ export function renderDemand(rows, hosts) {
     const marks = current.filter(function (c) { return c.model === r.model; })
       .map(function (c) { return c.label; });
     const model = esc(r.model) + (marks.length ? " · " + marks.map(esc).join(", ") : "");
-    return TR + esc(r.host_label) + TD + model + TD + num(r.active_requests, 0) + TD + num(r.warm_providers, 0) + TD + num(r.pressure, 2) + TD +
+    const scope = demandScopeBadge(Boolean(r.manager_eligible));
+    return TR + esc(r.host_label) + TD + model + TD + scope + TD + num(r.active_requests, 0) + TD + num(r.warm_providers, 0) + TD + num(r.pressure, 2) + TD +
       num(r.average_pressure, 2) + TD + num(r.blended_usd_per_million, 4) + TD +
       num(r.weight, 2) + "</td><td><b>" + num(r.score, 3) + "</b></td></tr>";
   }).join("");

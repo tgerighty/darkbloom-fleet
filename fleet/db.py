@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS demand_samples (
 );
 CREATE INDEX IF NOT EXISTS demand_samples_host_model_time
     ON demand_samples (host, model, observed_at DESC);
+ALTER TABLE demand_samples ADD COLUMN IF NOT EXISTS observed_prefill_tps DOUBLE PRECISION;
+ALTER TABLE demand_samples ADD COLUMN IF NOT EXISTS observed_decode_tps DOUBLE PRECISION;
+ALTER TABLE demand_samples ADD COLUMN IF NOT EXISTS aggregate_tps DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS switch_lease (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
@@ -146,7 +149,8 @@ def insert_demand_samples(pool: ConnectionPool, host: str, observed_at: float,
                            prices: dict[str, float], ema: dict[str, float]) -> None:
     rows = [
         (host, observed_at, model, s.active_requests, s.warm_providers, s.pressure,
-         prices.get(model), scores.get(model), ema.get(model))
+         prices.get(model), scores.get(model), ema.get(model),
+         s.observed_prefill_tps, s.observed_decode_tps, s.aggregate_tps)
         for model, s in samples.items()
     ]
     if not rows:
@@ -154,7 +158,9 @@ def insert_demand_samples(pool: ConnectionPool, host: str, observed_at: float,
     with pool.connection() as conn:
         conn.cursor().executemany(
             "INSERT INTO demand_samples (host, observed_at, model, active_requests, warm_providers, "
-            "pressure, output_usd_per_million, score, ema_score) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "pressure, output_usd_per_million, score, ema_score, "
+            "observed_prefill_tps, observed_decode_tps, aggregate_tps) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             rows,
         )
 
