@@ -38,3 +38,23 @@ def test_compute_scores_matches_pressure_times_price_times_weight():
 def test_compute_scores_excludes_models_with_no_price():
     samples = {"m": CapacitySample("m", 1, 1, 1.0)}
     assert compute_scores(samples, {}, {}) == {}
+
+
+def test_pressure_from_capacity_parses_optional_tps_fields():
+    sample = pressure_from_capacity({
+        "id": "m", "active_requests": 2, "warm_providers": 1,
+        "aggregate_tps": 55.5, "observed_prefill_tps": 120.0, "observed_decode_tps": 18.25,
+    })
+    assert sample.aggregate_tps == 55.5
+    assert sample.observed_prefill_tps == 120.0
+    assert sample.observed_decode_tps == 18.25
+
+
+def test_pressure_from_capacity_accepts_bare_tps_aliases_and_skips_non_finite():
+    sample = pressure_from_capacity({
+        "id": "m", "active_requests": 1, "warm_providers": 1,
+        "prefill_tps": 10, "decode_tps": "nan", "aggregate_tps": "nope",
+    })
+    assert sample.observed_prefill_tps == 10.0
+    assert sample.observed_decode_tps is None
+    assert sample.aggregate_tps is None

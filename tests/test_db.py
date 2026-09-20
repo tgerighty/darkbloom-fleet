@@ -29,7 +29,7 @@ def test_bulk_inserts_write_one_row_per_item(fake_pool):
     db.insert_payouts(pool, "h", [Payout(7, "m", 10, 25, 3.0, "session-1")], 4.0)
     db.save_ema(pool, "h", {"m": 0.4}, 5.0)
     assert [rows for _sql, rows in pool.calls] == [
-        [("h", 1.0, "m", 2, 1, 2.0, 0.1, 0.5, 0.4)],
+        [("h", 1.0, "m", 2, 1, 2.0, 0.1, 0.5, 0.4, None, None, None)],
         [("h", 7, "m", 10, 25, 3.0, "session-1", 4.0)],
         [("h", "m", 0.4, 5.0)],
     ]
@@ -129,3 +129,14 @@ def test_reads_return_the_stored_values(fake_pool):
     pool = fake_pool([{"m": 12}], ema_rows, [{"t": 100.0}], [{"t": 50.0}])
     assert db.last_payout_rowid(pool, "h") == 12
     assert db.load_ema(pool, "h") == ({"a": 0.3, "b": 0.1}, 7.0)
+
+
+def test_demand_sample_insert_persists_tps_fields(fake_pool):
+    pool = fake_pool()
+    sample = CapacitySample("m", 2, 1, 2.0, observed_prefill_tps=11.0,
+                            observed_decode_tps=7.5, aggregate_tps=90.0)
+    db.insert_demand_samples(pool, "h", 1.0, {"m": sample}, {"m": 0.5}, {"m": 0.1}, {"m": 0.4})
+    assert pool.calls[0][1] == [("h", 1.0, "m", 2, 1, 2.0, 0.1, 0.5, 0.4, 11.0, 7.5, 90.0)]
+    assert "observed_prefill_tps" in pool.calls[0][0]
+    assert "observed_decode_tps" in pool.calls[0][0]
+    assert "aggregate_tps" in pool.calls[0][0]

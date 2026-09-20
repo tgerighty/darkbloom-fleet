@@ -13,6 +13,12 @@ class CapacitySample:
     active_requests: int
     warm_providers: int
     pressure: float  # active_requests / max(1, warm_providers)
+    # Optional throughput from capacity/heartbeat payloads when present.
+    # Public /v1/models/capacity currently exposes aggregate_tps; observed_*
+    # keys are parsed when the wire starts sending them (often absent today).
+    observed_prefill_tps: float | None = None
+    observed_decode_tps: float | None = None
+    aggregate_tps: float | None = None
 
 
 @dataclass(frozen=True)

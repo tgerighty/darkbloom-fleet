@@ -320,7 +320,7 @@ describe("proposed-action indicator", function () {
 
 describe("demand merge", function () {
   it("shows an empty row and marks the host that is on that model", function () {
-    expect(renderDemand([], [])).toContain("no fresh manager scores yet");
+    expect(renderDemand([], [])).toContain("no on-disk models or fresh demand yet");
     const rows = mergeDemand([host(), host({ host: { label: "M1", spec: "Air" }, demand: undefined })]);
     expect(rows).toHaveLength(1);
     const html = renderDemand(rows, [host(), host({ host: { label: "M1", spec: "Air" }, current_model: "other" })]);
@@ -334,5 +334,14 @@ describe("demand merge", function () {
       { model: "gemma-4-26b-qat-4bit", ema_score: 1 },
     ] }]);
     expect(rows.map(function (row) { return row.model; })).toEqual(["gemma-4-26b", "gemma-4-26b-8bit", "gemma-4-26b-qat-4bit"]);
+  });
+
+  it("marks manager-eligible versus on-disk-only rows", function () {
+    const html = renderDemand([
+      { model: "oss", manager_eligible: true, score: 0.2, host_label: "M1" },
+      { model: "bonsai", manager_eligible: false, score: null, host_label: "M1" },
+    ], []);
+    expect(html).toContain(">eligible</span>");
+    expect(html).toContain(">on-disk</span>");
   });
 });
