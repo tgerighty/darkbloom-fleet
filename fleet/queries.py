@@ -37,13 +37,71 @@ def latest_demand_table(pool: ConnectionPool, host: str) -> list[Row]:
     return sorted(rows, key=lambda r: r["ema_score"] or 0, reverse=True)
 
 
+def _finite_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _first_finite(*values: object) -> float | None:
+    for value in values:
+        number = _finite_float(value)
+        if number is not None:
+            return number
+    return None
+
+
 def _manager_eligible_score(values: object) -> float | None:
     if not isinstance(values, dict) or not values.get("eligible"):
         return None
-    score = values.get("score")
-    if not isinstance(score, (int, float)) or not math.isfinite(score):
-        return None
-    return float(score)
+    return _finite_float(values.get("score"))
+
+
+def _display_score_from_inputs(
+    score: float | None,
+    average_pressure: float | None,
+    now_pressure: float | None,
+    blended: float | None,
+    weight: float | None,
+) -> tuple[float | None, float | None]:
+    """Fill missing display score as pressure × blended × weight (default 1.0)."""
+    if score is not None:
+        return score, weight
+    pressure = average_pressure if average_pressure is not None else now_pressure
+    if pressure is None or blended is None:
+        return None, weight
+    if weight is None:
+        weight = 1.0
+    return pressure * blended * weight, weight
+
+
+def _ineligible_ranking(values: dict[str, object], live_row: Row) -> dict[str, float | None]:
+    """Display-only ranking fields for an on-disk model the manager will not switch to.
+
+    Prefer a fresh score_snapshot entry (even when eligible is false). If those
+    inputs are missing, use live demand pressure × output_usd_per_million ×
+    weight (default 1.0). Does not change manager or collector eligibility.
+    """
+    now_pressure = _first_finite(values.get("now_pressure"), live_row.get("pressure"))
+    average_pressure = _finite_float(values.get("average_pressure"))
+    blended = _first_finite(
+        values.get("blended_usd_per_million"), live_row.get("output_usd_per_million"),
+    )
+    weight = _finite_float(values.get("weight"))
+    score, weight = _display_score_from_inputs(
+        _finite_float(values.get("score")),
+        average_pressure,
+        now_pressure,
+        blended,
+        weight,
+    )
+    return {
+        "pressure": now_pressure,
+        "average_pressure": average_pressure,
+        "blended_usd_per_million": blended,
+        "weight": weight,
+        "score": score,
+    }
 
 
 def _score_snapshot(daemon: Row) -> tuple[dict[str, object], object]:
@@ -91,20 +149,23 @@ def _demand_row(
     live: dict[str, Row],
 ) -> Row:
     values = snapshot_models.get(model) if snapshot_fresh else None
-    score = _manager_eligible_score(values)
-    eligible = score is not None
+    eligible_score = _manager_eligible_score(values)
+    eligible = eligible_score is not None
     values = values if isinstance(values, dict) else {}
     live_row = live.get(model, {})
+    ranking = {
+        "pressure": values.get("now_pressure"),
+        "average_pressure": values.get("average_pressure"),
+        "blended_usd_per_million": values.get("blended_usd_per_million"),
+        "weight": values.get("weight"),
+        "score": eligible_score,
+    } if eligible else _ineligible_ranking(values, live_row)
     return {
         "model": model,
         "manager_eligible": eligible,
         "active_requests": live_row.get("active_requests"),
         "warm_providers": live_row.get("warm_providers"),
-        "pressure": values.get("now_pressure") if eligible else live_row.get("pressure"),
-        "average_pressure": values.get("average_pressure") if eligible else None,
-        "blended_usd_per_million": values.get("blended_usd_per_million") if eligible else None,
-        "weight": values.get("weight") if eligible else None,
-        "score": score,
+        **ranking,
         "observed_prefill_tps": live_row.get("observed_prefill_tps"),
         "observed_decode_tps": live_row.get("observed_decode_tps"),
         "aggregate_tps": live_row.get("aggregate_tps"),
@@ -116,8 +177,10 @@ def manager_demand(daemon: Row | None, live_rows: list[Row], now: float) -> list
     """Live demand for every on-disk model on this host.
 
     Manager-eligible models keep their fresh score_snapshot ranking fields.
-    On-disk-only models are listed with live capacity/TPS when available.
-    Does not widen collector --model eligibility used for EMA scoring.
+    On-disk-only models stay listed with manager_eligible=false and still get
+    display scores from the same pressure × blended price × weight formula
+    (snapshot inputs when fresh, else live capacity/pricing). Does not widen
+    collector --model eligibility or what the manager will switch to.
     """
     daemon = daemon or {}
     snapshot_models, observed = _score_snapshot(daemon)

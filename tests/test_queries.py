@@ -301,7 +301,8 @@ def test_manager_demand_lists_all_on_disk_models_with_scope_badges():
     snapshot = {"observed_at": 1000, "models": {
         "oss": {"eligible": True, "score": .2, "now_pressure": 1.5,
                 "average_pressure": 2.0, "blended_usd_per_million": .03, "weight": 1},
-        "bonsai": {"eligible": False, "score": 99},
+        "bonsai": {"eligible": False, "score": .08, "now_pressure": 2.0,
+                   "average_pressure": 2.0, "blended_usd_per_million": .04, "weight": 1},
     }}
     daemon = {
         "installed_models": ["oss", "bonsai", "disk-only"],
@@ -309,23 +310,59 @@ def test_manager_demand_lists_all_on_disk_models_with_scope_badges():
     }
     live = [
         {"model": "oss", "observed_at": 1000, "active_requests": 10, "warm_providers": 5,
-         "pressure": 2.0, "aggregate_tps": 100.0, "observed_prefill_tps": None,
-         "observed_decode_tps": 12.5},
+         "pressure": 2.0, "output_usd_per_million": .01, "aggregate_tps": 100.0,
+         "observed_prefill_tps": None, "observed_decode_tps": 12.5},
         {"model": "disk-only", "observed_at": 1000, "active_requests": 3, "warm_providers": 1,
-         "pressure": 3.0, "aggregate_tps": 40.0},
+         "pressure": 3.0, "output_usd_per_million": .02, "aggregate_tps": 40.0},
     ]
     rows = queries.manager_demand(daemon, live, 1010)
     assert [r["model"] for r in rows] == ["oss", "bonsai", "disk-only"]
     assert rows[0]["manager_eligible"] is True and rows[0]["score"] == .2
     assert rows[0]["observed_decode_tps"] == 12.5 and rows[0]["aggregate_tps"] == 100.0
-    assert rows[1]["manager_eligible"] is False and rows[1]["score"] is None
+    assert rows[1]["manager_eligible"] is False and rows[1]["score"] == .08
+    assert rows[1]["average_pressure"] == 2.0 and rows[1]["blended_usd_per_million"] == .04
+    assert rows[1]["weight"] == 1
     assert rows[2]["manager_eligible"] is False and rows[2]["active_requests"] == 3
-    # Stale snapshot still lists on-disk models with live capacity, no scores.
+    assert rows[2]["score"] == 3.0 * .02 * 1.0
+    assert rows[2]["pressure"] == 3.0 and rows[2]["blended_usd_per_million"] == .02
+    assert rows[2]["weight"] == 1.0 and rows[2]["average_pressure"] is None
+    # Stale snapshot: eligibility cannot be confirmed. Snapshot ranking fields
+    # are discarded; display scores come only from fresh live pressure × price.
     live_fresh = [
         {**live[0], "observed_at": 1280},
         {**live[1], "observed_at": 1280},
     ]
     stale = queries.manager_demand(daemon, live_fresh, 1300)
-    assert [r["model"] for r in stale] == ["oss", "bonsai", "disk-only"]
-    assert all(r["manager_eligible"] is False and r["score"] is None for r in stale)
-    assert stale[0]["active_requests"] == 10
+    by_model = {r["model"]: r for r in stale}
+    assert [r["model"] for r in stale] == ["disk-only", "oss", "bonsai"]
+    assert all(r["manager_eligible"] is False for r in stale)
+    assert by_model["oss"]["score"] == 2.0 * .01 * 1.0
+    assert by_model["oss"]["active_requests"] == 10
+    assert by_model["disk-only"]["score"] == 3.0 * .02 * 1.0
+    assert by_model["bonsai"]["score"] is None
+
+
+def test_manager_demand_computes_ineligible_score_from_snapshot_inputs():
+    snapshot = {"observed_at": 1000, "models": {
+        "oss": {"eligible": True, "score": .2, "now_pressure": 1.5,
+                "average_pressure": 2.0, "blended_usd_per_million": .03, "weight": 1},
+        "qwen": {"eligible": False, "now_pressure": 4.0,
+                 "average_pressure": 5.0, "blended_usd_per_million": .02, "weight": 1.25},
+    }}
+    daemon = {
+        "installed_models": ["oss", "qwen"],
+        "manager": {"score_snapshot": snapshot},
+    }
+    rows = queries.manager_demand(daemon, [], 1010)
+    assert [r["model"] for r in rows] == ["oss", "qwen"]
+    assert rows[0]["manager_eligible"] is True and rows[0]["score"] == .2
+    assert rows[0]["pressure"] == 1.5 and rows[0]["blended_usd_per_million"] == .03
+    assert rows[1]["manager_eligible"] is False
+    assert rows[1]["score"] == 5.0 * .02 * 1.25
+    assert rows[1]["pressure"] == 4.0 and rows[1]["average_pressure"] == 5.0
+    assert rows[1]["weight"] == 1.25
+    # A present snapshot score is used as-is even when it differs from the inputs.
+    snapshot["models"]["qwen"]["score"] = .5
+    preferred = {r["model"]: r for r in queries.manager_demand(daemon, [], 1010)}
+    assert preferred["oss"]["manager_eligible"] is True and preferred["oss"]["score"] == .2
+    assert preferred["qwen"]["manager_eligible"] is False and preferred["qwen"]["score"] == .5

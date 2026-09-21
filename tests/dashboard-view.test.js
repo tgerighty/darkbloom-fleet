@@ -339,9 +339,12 @@ describe("demand merge", function () {
   it("marks manager-eligible versus on-disk-only rows", function () {
     const html = renderDemand([
       { model: "oss", manager_eligible: true, score: 0.2, host_label: "M1" },
-      { model: "bonsai", manager_eligible: false, score: null, host_label: "M1" },
+      { model: "bonsai", manager_eligible: false, score: 0.12, host_label: "M1",
+        pressure: 2, average_pressure: 2, blended_usd_per_million: 0.06, weight: 1 },
     ], []);
     expect(html).toContain(">eligible</span>");
     expect(html).toContain(">on-disk</span>");
+    expect(html).toContain("<b>0.120</b>");
+    expect(html).not.toMatch(/bonsai[\s\S]*<b>–<\/b>/);
   });
 });
