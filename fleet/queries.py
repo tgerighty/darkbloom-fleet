@@ -57,6 +57,24 @@ def _manager_eligible_score(values: object) -> float | None:
     return _finite_float(values.get("score"))
 
 
+def _display_score_from_inputs(
+    score: float | None,
+    average_pressure: float | None,
+    now_pressure: float | None,
+    blended: float | None,
+    weight: float | None,
+) -> tuple[float | None, float | None]:
+    """Fill missing display score as pressure × blended × weight (default 1.0)."""
+    if score is not None:
+        return score, weight
+    pressure = average_pressure if average_pressure is not None else now_pressure
+    if pressure is None or blended is None:
+        return None, weight
+    if weight is None:
+        weight = 1.0
+    return pressure * blended * weight, weight
+
+
 def _ineligible_ranking(values: dict[str, object], live_row: Row) -> dict[str, float | None]:
     """Display-only ranking fields for an on-disk model the manager will not switch to.
 
@@ -70,13 +88,13 @@ def _ineligible_ranking(values: dict[str, object], live_row: Row) -> dict[str, f
         values.get("blended_usd_per_million"), live_row.get("output_usd_per_million"),
     )
     weight = _finite_float(values.get("weight"))
-    score = _finite_float(values.get("score"))
-    if score is None:
-        pressure = average_pressure if average_pressure is not None else now_pressure
-        if pressure is not None and blended is not None:
-            if weight is None:
-                weight = 1.0
-            score = pressure * blended * weight
+    score, weight = _display_score_from_inputs(
+        _finite_float(values.get("score")),
+        average_pressure,
+        now_pressure,
+        blended,
+        weight,
+    )
     return {
         "pressure": now_pressure,
         "average_pressure": average_pressure,
