@@ -38,6 +38,18 @@ function head(html) {
 }
 
 describe("host card edges", function () {
+  it("shows escaped health details with severity colors and a healthy fallback", function () {
+    const states = [
+      ["DAEMON_DOWN", "down"], ["DEAD_SESSION", "down"], ["THRASH", "warn"],
+      ["STALE", "warn"], ["HEALTHY", "ok"], ["UNKNOWN", "ok"],
+    ];
+    for (const [state, tone] of states) {
+      const html = renderHost(host({ health: { state, detail: "<stale>" } }), "24h", "");
+      expect(head(html)).toContain('class="badge ' + tone + '" title="&lt;stale&gt;">' + state);
+    }
+    expect(head(renderHost(host(), "24h", ""))).toContain('title="">HEALTHY</span>');
+  });
+
   it("shows LIVE KEEP, ages, empty chips, idle-last serving, inactive slots, and measured switch cost",
     function () {
       const html = renderHost(host({
