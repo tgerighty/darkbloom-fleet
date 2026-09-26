@@ -60,11 +60,14 @@ def _switch_condition(status: dict[str, object], provider: bool, manager: bool) 
     return False if manager or recovered else None
 
 
+def _valid_probe(status: object) -> bool:
+    return isinstance(status, dict) and all(type(status.get(key)) is bool for key in
+                                            ('provider_running', 'provider_fresh', 'manager_running', 'manager_fresh'))
+
+
 def conditions(status):
     """None means unknown: retain an existing switch alert until a good read."""
-    if status is not None and (not isinstance(status, dict)
-            or any(type(status.get(key)) is not bool for key in
-                   ('provider_running', 'provider_fresh', 'manager_running', 'manager_fresh'))):
+    if status is not None and not _valid_probe(status):
         status = None
     if status is None:
         return {"DarkbloomProviderUnavailable": (GRACE, "Machine cannot be reached; provider status is unknown."),
@@ -78,7 +81,7 @@ def conditions(status):
     }
 
 
-def _finite_number(value):
+def _finite_number(value: object) -> bool:
     if type(value) not in (int, float):
         return False
     try:
@@ -88,29 +91,43 @@ def _finite_number(value):
         return False
 
 
+def _valid_record(value: object) -> bool:
+    return (isinstance(value, dict) and _finite_number(value.get('since'))
+            and type(value.get('firing')) is bool and isinstance(value.get('detail'), str)
+            and ('ended' not in value or _finite_number(value['ended'])))
+
+
+def _saved_state(saved):
+    if not isinstance(saved, dict):
+        return {}
+    return {name: dict(value) for name, value in saved.items()
+            if name in SUMMARIES and _valid_record(value)}
+
+
+def _advance_alert(state, name, condition, now):
+    if condition is None:
+        return
+    if condition is False:
+        item = state.get(name)
+        if item is None:
+            return
+        if item['firing']:
+            item.setdefault('ended', now)
+        else:
+            del state[name]
+        return
+    delay, detail = condition
+    if name not in state or 'ended' in state[name]:
+        state[name] = {'since': now, 'firing': False}
+    item = state[name]
+    item['detail'] = detail
+    item['firing'] = item['firing'] or now - item['since'] >= delay
+
+
 def transition(saved, observed, now):
-    state = {name: dict(value) for name, value in (saved.items() if isinstance(saved, dict) else ())
-             if name in SUMMARIES and isinstance(value, dict)
-             and _finite_number(value.get('since')) and type(value.get('firing')) is bool
-             and isinstance(value.get('detail'), str)
-             and ('ended' not in value or _finite_number(value['ended']))}
+    state = _saved_state(saved)
     for name, condition in observed.items():
-        if condition is None:
-            continue
-        if condition is False:
-            if name in state:
-                if state[name]['firing']:
-                    state[name].setdefault('ended', now)
-                else:
-                    del state[name]
-            continue
-        delay, detail = condition
-        previous = state.get(name)
-        if previous is None or 'ended' in previous:
-            state[name] = {'since': now, 'firing': False}
-        item = state[name]
-        item['detail'] = detail
-        item['firing'] = item['firing'] or now - item['since'] >= delay
+        _advance_alert(state, name, condition, now)
     return state
 
 
