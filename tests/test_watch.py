@@ -70,3 +70,20 @@ def test_malformed_pending_switch_keeps_provider_status():
         result = conditions({**status, 'pending': pending})
         assert result['DarkbloomProviderUnavailable'] is False
         assert result['DarkbloomManagerSwitchFailed'] is False
+
+
+def test_malformed_probe_cannot_claim_a_healthy_provider():
+    status = {'provider_running': 'yes', 'provider_fresh': True, 'manager_running': True,
+              'manager_fresh': True, 'warm': [], 'pending': None, 'reason': ''}
+    assert conditions(status)['DarkbloomProviderUnavailable'] != False
+
+
+def test_malformed_saved_alert_does_not_block_valid_alert_delivery():
+    saved = {'DarkbloomProviderUnavailable': {'since': 'bad', 'firing': False, 'detail': 'bad'},
+             'DarkbloomManagerUnavailable': {'since': 1000, 'firing': True, 'detail': 'stopped'},
+             'unknown': {'since': 1000, 'firing': True, 'detail': 'bad'}}
+    observed = {'DarkbloomProviderUnavailable': (300, 'provider stopped'),
+                'DarkbloomManagerUnavailable': None}
+    state = transition(saved, observed, 1300)
+    assert state['DarkbloomProviderUnavailable']['since'] == 1300
+    assert len(payload('m1', state, 1300)) == 1

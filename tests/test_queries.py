@@ -233,6 +233,14 @@ def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     assert status["card"]["status"]["state"] == "OFF" and status["card"]["kpis"]["tokens"] == 4_000
 
 
+def test_build_status_expires_stored_fresh_flag(fake_pool, monkeypatch):
+    _clock(monkeypatch, 10_000.0)
+    daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_800.0}
+    pool = fake_pool(*_status_responses([daemon], []))
+    status = queries.build_status(_host_cfg("m1"), pool, {}, (None, {}))
+    assert status["daemon_fresh"] is False
+
+
 def test_shared_status_data_is_attribution_plus_self_route(fake_pool):
     pool = fake_pool(
         [{"payout_rowid": 1, "provider_hash": "s1", "host": "m3"}],

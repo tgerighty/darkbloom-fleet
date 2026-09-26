@@ -63,6 +63,14 @@ def test_a_self_route_payload_of_the_wrong_shape_is_an_error_not_an_empty_listin
         demand.fetch_self_route("https://x", "k")
 
 
+def test_all_invalid_self_route_rows_are_not_a_successful_empty_probe(monkeypatch):
+    monkeypatch.setattr(demand, "_get_json", lambda url, headers=None: {"data": [{"id": "m", "metadata": {"routable_providers": "bad"}}]})
+    with pytest.raises(ValueError, match="no valid model rows"):
+        demand.fetch_self_route("https://x", "k")
+    monkeypatch.setattr(demand, "_get_json", lambda url, headers=None: {"data": []})
+    assert demand.fetch_self_route("https://x", "k") == {}
+
+
 def test_fetch_capacity_reads_the_data_list(monkeypatch):
     payload = {"data": [{"id": "m", "active_requests": 4, "warm_providers": 2}, {"no_id": True}]}
     monkeypatch.setattr(demand, "_get_json", lambda url: payload)
@@ -71,6 +79,12 @@ def test_fetch_capacity_reads_the_data_list(monkeypatch):
 
 def test_a_capacity_payload_of_the_wrong_shape_is_an_error(monkeypatch):
     monkeypatch.setattr(demand, "_get_json", lambda url: "oops")
+    with pytest.raises(TypeError, match="not a model list"):
+        demand.fetch_capacity("https://x")
+
+
+def test_capacity_envelope_requires_a_known_list_field(monkeypatch):
+    monkeypatch.setattr(demand, "_get_json", lambda url: {"error": "unavailable"})
     with pytest.raises(TypeError, match="not a model list"):
         demand.fetch_capacity("https://x")
 
@@ -87,6 +101,18 @@ def test_malformed_price_rows_are_skipped(monkeypatch):
     monkeypatch.setattr(demand, "_get_json", lambda url: payload)
     prices, fallback = demand.fetch_output_prices("https://x")
     assert prices == {"a": 0.1} and fallback == 0.2
+
+
+def test_supplied_prices_must_be_a_list(monkeypatch):
+    monkeypatch.setattr(demand, "_get_json", lambda url: {"fallback_output_price": 200000, "prices": {"a": 100000}})
+    with pytest.raises(TypeError, match="prices is not a list"):
+        demand.fetch_output_prices("https://x")
+
+
+def test_overflowing_optional_price_row_does_not_discard_neighbor(monkeypatch):
+    monkeypatch.setattr(demand, "_get_json", lambda url: {"prices": [
+        {"model": "bad", "output_price": 1e400}, {"model": "good", "output_price": 100000}]})
+    assert demand.fetch_output_prices("https://x") == ({"good": 0.1}, 0.0)
 
 
 def test_resolve_prices_fills_gaps_with_the_fallback_and_drops_free_models():
