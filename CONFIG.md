@@ -80,9 +80,8 @@ Shared by every host:
 
 ## Per-host card data (no new env vars)
 
-The dashboard's per-host console card and `/api/status`'s `card` block are fed
-by two data points the tick reads alongside `daemon-state.json`, in the same
-SSH round trip:
+The card combines widget metrics, daemon capacity and slots, and the last
+model load error from one SSH response:
 
 - The Mac widget's metrics DB, latest sample
   (`sqlite3 ~/.darkbloom-widget/metrics.db "select json from samples order by
@@ -99,8 +98,8 @@ SSH round trip:
   an absolute unix timestamp). Missing, malformed, or non-finite values become
   NULL and never fail the daemon read. The card shows the error and whether it is recent.
 
-Both land in `daemon_snapshots` (one ALTER-added column each; `slots` as
-JSONB), so the card needs no extra endpoint and history is queryable.
+The collector stores these values in `daemon_snapshots`. Metrics and load-error
+fields use separate columns. Slots use JSONB.
 
 ## Local model inventory
 
@@ -134,8 +133,7 @@ The existing primary key makes this replay safe; normal incremental collection
 then includes new rewards. The replay restores only records still in the Mac's
 saved ledger.
 
-The demand table uses each Mac manager's saved score snapshot: average network
-pressure over five one-minute samples × blended token price (85% input, 15%
-output) × configured model weight. Rows are separate per host and include only
-eligible models. Snapshots older than three minutes are omitted. The table's
-ranking is before the manager's dwell, improvement, and switching-cost checks.
+The demand table lists installed models separately for each host. Fresh manager
+snapshots provide ranking inputs. Other display scores use fresh capacity and
+pricing data when available. The eligibility badge describes manager switching
+eligibility. Display scores do not change that eligibility.

@@ -11,8 +11,7 @@ from fleet.types import DaemonState, Payout, Slot
 
 
 def _state_output(daemon_json: str, widget_json: str = "", manager_json: str = "", manager_pid: str = "") -> str:
-    """What _STATE_COMMAND's single SSH round trip prints: the daemon doc, the
-    separator, then the widget's latest sample row (empty when absent)."""
+    """Build the four-field SSH response, including optional manager state and the running marker."""
     return (daemon_json + f"\n{remote._DOC_SEPARATOR}\n" + widget_json +
             f"\n{remote._DOC_SEPARATOR}\n" + manager_json +
             f"\n{remote._DOC_SEPARATOR}\n" + manager_pid)

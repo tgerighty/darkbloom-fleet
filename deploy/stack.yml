@@ -123,7 +123,7 @@ services:
         delay: 10s
         failure_action: rollback
         monitor: 120s
-        # stop-first: two overlapping tasks would both write the same decisions.
+        # Stop the old task before starting its replacement to avoid overlapping collection.
         order: stop-first
       restart_policy:
         condition: any

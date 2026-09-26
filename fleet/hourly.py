@@ -80,7 +80,7 @@ def _hour_rows(hours: range, newest: int, now: float, buckets: dict[int, dict[st
 
 
 def hourly_jobs(pool: ConnectionPool, hashes: list[str], now: float) -> Row:
-    """Return one model letter or idle dot for each elapsed hour portion."""
+    """Return a model legend and hourly rows containing payout counts, model IDs or None per portion, and percentages."""
     newest = int(now // HOUR_SECONDS) * HOUR_SECONDS
     hours = range(newest, newest - BUCKETS * HOUR_SECONDS, -HOUR_SECONDS)
     with pool.connection() as conn:

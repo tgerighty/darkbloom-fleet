@@ -1,9 +1,5 @@
-"""Post-restart routability for the dashboard: what the coordinator will route
-to on our machines (the self-route listing) against what each host advertises
-and has warm, plus how long the current daemon session took to become routable
-and to get its first request. Those two durations are the measured switch
-penalty that the fixed switch-cost guardrail only estimates.
-"""
+"""Dashboard routability observations, per-host request timings, and measured
+restart delays."""
 from __future__ import annotations
 
 from psycopg_pool import ConnectionPool
@@ -114,10 +110,8 @@ def _usable_measured_cost(median: float | None, n: int) -> float | None:
 
 
 def measured_switch_cost(pool: ConnectionPool, host: str) -> tuple[float, int] | None:
-    """The measured post-restart penalty the switch-cost guardrail uses in
-    place of the fixed DARKBLOOM_SWITCH_COST_SECONDS estimate: (median
-    seconds, session count), or None until 3 sessions have served a request —
-    fewer would make the median noise."""
+    """Return median start-to-first-request seconds and session count.
+    Return None until at least three sessions have served a request."""
     median, n = _switch_cost_sessions(pool, host)
     seconds = _usable_measured_cost(median, n)
     return (seconds, n) if seconds is not None else None

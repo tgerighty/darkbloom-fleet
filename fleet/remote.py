@@ -16,8 +16,8 @@ EARNINGS_DB_PATH = "~/.darkbloom-widget/earnings-observation.sqlite3"
 WIDGET_METRICS_DB_PATH = "~/.darkbloom-widget/metrics.db"
 MANAGER_STATE_PATH = "~/.local/share/benbuschmann-darkbloom-manager/state.json"
 _WIDGET_LATEST_SQL = "select json from samples order by timestamp desc limit 1"
-# Printed between the two documents so one SSH round trip can carry both; the
-# daemon doc is JSON, so a distinctive marker line can never occur inside it.
+# Separate daemon, widget, manager, and running-marker fields in one SSH
+# response. A raw separator line cannot occur inside valid JSON.
 _DOC_SEPARATOR = "___fleet-docs___"
 _STATE_COMMAND = (
     f"cat {DAEMON_STATE_PATH} && printf '\\n{_DOC_SEPARATOR}\\n' && "
@@ -261,7 +261,7 @@ def _model_ids(payload: dict[str, object], key: str) -> tuple[str, ...]:
 
 
 def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
-    """Ground-truth $/model/hour, read-only, from the real payouts ledger."""
+    """Read account-wide payout rows with rowid greater than since_rowid from the remote ledger."""
     script = _PAYOUTS_SNIPPET.format(db_path=EARNINGS_DB_PATH.removeprefix("~/"),
                                      since_rowid=int(since_rowid), batch_size=PAYOUT_BATCH_SIZE)
     remote_command = f"{shlex.quote(cfg.remote_python)} - <<'PY'\n{script}\nPY"
