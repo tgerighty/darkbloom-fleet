@@ -38,8 +38,10 @@ def test_static_modules_must_be_revalidated_on_every_load():
     assert response.headers["cache-control"] == "no-cache"
 
 
-def _patch_status(monkeypatch, build, shared=None):
+def _patch_status(monkeypatch, build, shared=None, extras=None):
     monkeypatch.setattr(web.queries, "shared_status_data", shared or (lambda pool: ({}, (None, {}))))
+    monkeypatch.setattr(web.queries, "unconfigured_host_ids",
+                        (lambda pool, configured: list(extras or [])))
     monkeypatch.setattr(web.queries, "build_status", build)
 
 
@@ -185,3 +187,22 @@ def test_status_shares_hourly_letters_and_colour_order_across_hosts(monkeypatch)
     assert hosts[0]['hourly_jobs']['legend'] == hosts[1]['hourly_jobs']['legend'] == expected
     assert hosts[0]['hourly_jobs']['rows'][0]['portions'] == ['gemma-4-26b-qat', 'gpt-oss-20b']
     assert hosts[1]['hourly_jobs']['rows'][0]['portions'] == ['gpt-oss-20b', 'nvidia-nemotron-3.5-lightning']
+
+
+def test_status_appends_discovered_hosts_after_configured(monkeypatch):
+    seen = []
+
+    def build(cfg, pool, attributed, self_route):
+        seen.append(cfg.host_id)
+        return {"host": {"label": cfg.host_label, "spec": cfg.host_spec}}
+
+    _patch_status(monkeypatch, build, extras=["m4-128-1"])
+    app = web.create_app(
+        (SimpleNamespace(host_id="m3-48-1", host_label="m3-48-1", host_spec="M3",
+                         daemon_freshness_seconds=90, switch_cost_seconds=300),),
+        pool=None,
+    )
+    body = asyncio.run(_route(app, "/api/status").endpoint())
+    assert [row["host"]["label"] for row in body["hosts"]] == ["m3-48-1", "m4-128-1"]
+    assert body["hosts"][1]["host"]["spec"] == "discovered"
+    assert seen == ["m3-48-1", "m4-128-1"]

@@ -3,8 +3,8 @@ writes so each file stays small and single-purpose.
 """
 from __future__ import annotations
 
-import time
 import math
+import time
 from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
@@ -362,6 +362,21 @@ def serving_percentages(pool: ConnectionPool, host: str, now: float) -> dict[str
     }
     named["lifetime"] = _lifetime_shares(lifetime_rows, now)
     return named
+
+
+def known_host_ids(pool: ConnectionPool) -> list[str]:
+    """Hosts seen via verified provider identity or collector heartbeats."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT host FROM provider_identities "
+            "UNION SELECT host FROM daemon_snapshots"
+        ).fetchall()
+    return sorted({str(row["host"]) for row in rows if row.get("host")})
+
+
+def unconfigured_host_ids(pool: ConnectionPool, configured: set[str]) -> list[str]:
+    """Discovered hosts not already driven by DARKBLOOM_HOST_N_* (sorted)."""
+    return [host for host in known_host_ids(pool) if host not in configured]
 
 
 def shared_status_data(

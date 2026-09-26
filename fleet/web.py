@@ -67,19 +67,62 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     @app.get("/api/status", response_model=None)
     async def status() -> dict[str, list[queries.Row]]:
         # Attribution and the self-route view are account-wide: query once,
-        # then every host row reads the same mapping.
+        # then every host row reads the same mapping. Host cards are the
+        # configured SSH collectors plus any provider_id / heartbeat host the
+        # account identity map already knows about.
         try:
             attributed, self_route = await asyncio.to_thread(queries.shared_status_data, pool)
+            extras = await asyncio.to_thread(
+                queries.unconfigured_host_ids, pool, _configured_host_ids(configs),
+            )
         except Exception:
             log.exception("shared status data failed")
             return {"hosts": [_error_host(cfg) for cfg in configs]}
+        display = _display_configs(configs, extras)
         statuses = await asyncio.gather(
-            *(asyncio.to_thread(_status_row, cfg, pool, attributed, self_route) for cfg in configs)
+            *(asyncio.to_thread(_status_row, cfg, pool, attributed, self_route) for cfg in display)
         )
         hourly.share_legends(statuses)
         return {"hosts": list(statuses)}
 
     return app
+
+
+
+def _configured_host_ids(configs: tuple[Config, ...]) -> set[str]:
+    ids: set[str] = set()
+    for cfg in configs:
+        host_id = getattr(cfg, "host_id", None)
+        if isinstance(host_id, str) and host_id:
+            ids.add(host_id)
+    return ids
+
+
+def _display_configs(configs: tuple[Config, ...], extra_ids: list[str]) -> list[object]:
+    """Configured hosts first (deploy order), then discovered provider ids.
+
+    Discovered rows are display-only: build_status only reads host_id/label/spec
+    and the freshness/switch-cost knobs copied from the first configured host.
+    """
+    from types import SimpleNamespace
+
+    if not extra_ids:
+        return list(configs)
+    if not configs:
+        return []
+    template = configs[0]
+    extras = [
+        SimpleNamespace(
+            host_id=host_id,
+            host_label=host_id,
+            host_spec="discovered",
+            daemon_freshness_seconds=getattr(template, "daemon_freshness_seconds", 90.0),
+            switch_cost_seconds=getattr(template, "switch_cost_seconds", 300.0),
+        )
+        for host_id in extra_ids
+    ]
+    return [*configs, *extras]
+
 
 
 def _error_host(cfg: Config) -> queries.Row:
