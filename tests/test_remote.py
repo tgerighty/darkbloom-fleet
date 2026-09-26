@@ -231,6 +231,8 @@ def test_ledger_ingestion_includes_base_rewards(tmp_path, capsys):
     rows = json.loads(capsys.readouterr().out)
     assert [row[0] for row in rows] == [1, 2, 3]
     assert sum(row[3] for row in rows if row[5] == "m1") == 2030
+    exec(remote._PAYOUTS_SNIPPET.format(db_path=str(ledger), since_rowid=1))
+    assert [row[0] for row in json.loads(capsys.readouterr().out)] == [2, 3]
 
 
 def test_manager_report_preserves_score_snapshot():
