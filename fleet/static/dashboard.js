@@ -1,7 +1,7 @@
 import { hourlySection } from "./hourly.js?v=4";
 import { esc, renderHosts } from "./host.js?v=10";
 import {
-  captureFocus, captureUiState, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
+  captureFocus, captureUiState, fmtAge, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
 } from "./ui.js?v=8";
 
 const SUBTITLE_ID = "fleet-subtitle";
@@ -12,14 +12,6 @@ let lastGoodAt = null;
 let pollError = null;
 const gate = makeRefreshGate();
 let inflight = null;
-
-function fmtAge(epoch) {
-  if (!epoch) return "never";
-  const s = Math.max(0, Math.round(Date.now() / 1000 - epoch));
-  if (s < 90) return s + "s ago";
-  if (s < 5400) return Math.round(s / 60) + "m ago";
-  return Math.round(s / 3600) + "h ago";
-}
 
 function subtitleEl() {
   return document.getElementById(SUBTITLE_ID);

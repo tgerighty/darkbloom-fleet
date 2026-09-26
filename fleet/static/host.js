@@ -1,4 +1,4 @@
-import { esc } from "./ui.js?v=5";
+import { esc, fmtAge } from "./ui.js?v=5";
 export { esc } from "./ui.js?v=5";
 
 const TD = "</td><td>";
@@ -21,13 +21,6 @@ const EMPTY_CARD = { status: null, resources: {}, gpu: {}, loaded: [], catalog: 
 const EMPTY_ROUT = { models: [], session: null, self_route_as_of: null, last_served_at: null, switch_cost: null };
 const HEALTH_TONE = { DAEMON_DOWN: "down", DEAD_SESSION: "down", THRASH: "warn", STALE: "warn", HEALTHY: "ok" };
 
-function fmtAge(epoch) {
-  if (!epoch) return "never";
-  const s = Math.max(0, Math.round(Date.now() / 1000 - epoch));
-  if (s < 90) return s + "s ago";
-  if (s < 5400) return Math.round(s / 60) + "m ago";
-  return Math.round(s / 3600) + "h ago";
-}
 function fmtUp(epoch) {
   if (!epoch) return "–";
   const s = Math.max(0, Math.round(Date.now() / 1000 - epoch));

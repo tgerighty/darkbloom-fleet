@@ -8,6 +8,13 @@ const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;
 export function esc(v) {
   return v === null || v === undefined ? "" : String(v).replaceAll(/[&<>"'`]/g, (c) => ESC[c]);
 }
+export function fmtAge(epoch) {
+  if (!epoch) return "never";
+  const s = Math.max(0, Math.round(Date.now() / 1000 - epoch));
+  if (s < 90) return s + "s ago";
+  if (s < 5400) return Math.round(s / 60) + "m ago";
+  return Math.round(s / 3600) + "h ago";
+}
 function num(v, digits) { return v === null || v === undefined ? "–" : Number(v).toFixed(digits); }
 
 export function mergeDemand(hosts) {
