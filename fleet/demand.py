@@ -13,7 +13,6 @@ from .scoring import pressure_from_capacity
 from .types import CapacitySample
 
 USER_AGENT = "darkbloom-fleet/0.1"
-Json = dict[str, object] | list[object]
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -24,7 +23,7 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def _get_json(url: str, headers: dict[str, str] | None = None) -> Json:
+def _get_json(url: str, headers: dict[str, str] | None = None) -> object:
     if headers and urlsplit(url).scheme != "https":
         raise ValueError("authenticated requests require HTTPS")
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT, **(headers or {})})
@@ -41,7 +40,7 @@ def _routable_count(row: object) -> tuple[str, int] | None:
     routable = meta.get("routable_providers") if isinstance(meta, dict) else 0
     try:
         return str(row["id"]), int(routable or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -59,13 +58,16 @@ def fetch_self_route(base_url: str, api_key: str) -> dict[str, int]:
     if not isinstance(rows, list):
         # A wrong-shaped 200 must not be recorded as "nothing routable".
         raise TypeError("self-route payload is not a model listing")
-    return {c[0]: c[1] for row in rows if (c := _routable_count(row))}
+    counts = {c[0]: c[1] for row in rows if (c := _routable_count(row))}
+    if rows and not counts:
+        raise ValueError("self-route listing has no valid model rows")
+    return counts
 
 
 def fetch_capacity(base_url: str) -> dict[str, CapacitySample]:
     payload = _get_json(f"{base_url.rstrip('/')}/v1/models/capacity")
     if isinstance(payload, dict):
-        payload = payload.get("data", payload.get("models", []))
+        payload = payload.get("data", payload.get("models"))
     if not isinstance(payload, list):
         # Same rule as fetch_self_route: a wrong shape is an error, not "no demand".
         raise TypeError("capacity payload is not a model list")
@@ -83,7 +85,7 @@ def _price_per_token(row: object) -> tuple[str, float] | None:
         return None
     try:
         return str(row["model"]), max(0, int(row.get("output_price") or 0)) / 1_000_000
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -94,7 +96,9 @@ def fetch_output_prices(pricing_url: str) -> tuple[dict[str, float], float]:
     if not isinstance(payload, dict):
         raise TypeError("pricing payload is not a JSON object")
     fallback = max(0, int(payload.get("fallback_output_price") or 0)) / 1_000_000
-    rows = payload.get("prices") or []
+    rows = payload.get("prices", [])
+    if not isinstance(rows, list):
+        raise TypeError("prices is not a list")
     return {p[0]: p[1] for row in rows if (p := _price_per_token(row))}, fallback
 
 

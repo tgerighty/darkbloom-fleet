@@ -82,7 +82,9 @@ if (servingEl) {
 async function loadStatus(signal) {
   const response = await fetch("/api/status", { signal });
   if (!response.ok) throw new Error("HTTP " + response.status);
-  return response.json();
+  const data = await response.json();
+  if (!Array.isArray(data?.hosts)) throw new TypeError("status payload has no hosts array");
+  return data;
 }
 
 function applyStatus(token, data) {

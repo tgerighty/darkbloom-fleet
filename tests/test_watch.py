@@ -75,7 +75,7 @@ def test_malformed_pending_switch_keeps_provider_status():
 def test_malformed_probe_cannot_claim_a_healthy_provider():
     status = {'provider_running': 'yes', 'provider_fresh': True, 'manager_running': True,
               'manager_fresh': True, 'warm': [], 'pending': None, 'reason': ''}
-    assert conditions(status)['DarkbloomProviderUnavailable'] != False
+    assert conditions(status)['DarkbloomProviderUnavailable'] is not False
 
 
 def test_malformed_saved_alert_does_not_block_valid_alert_delivery():

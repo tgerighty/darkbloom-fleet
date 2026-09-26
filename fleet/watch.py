@@ -58,6 +58,13 @@ def _switch_condition(status: dict[str, object], provider: bool, manager: bool) 
 
 def conditions(status):
     """None means unknown: retain an existing switch alert until a good read."""
+    if status is not None and (not isinstance(status, dict)
+            or any(type(status.get(key)) is not bool for key in
+                   ('provider_running', 'provider_fresh', 'manager_running', 'manager_fresh'))
+            or not isinstance(status.get('warm'), list)
+            or not all(isinstance(model, str) for model in status['warm'])
+            or not isinstance(status.get('reason'), str)):
+        status = None
     if status is None:
         return {"DarkbloomProviderUnavailable": (GRACE, "Machine cannot be reached; provider status is unknown."),
                 "DarkbloomManagerUnavailable": None, "DarkbloomManagerSwitchFailed": None}
@@ -70,8 +77,22 @@ def conditions(status):
     }
 
 
+def _finite_number(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        dt.datetime.fromtimestamp(value, dt.timezone.utc)
+        return True
+    except (OverflowError, OSError, ValueError):
+        return False
+
+
 def transition(saved, observed, now):
-    state = {name: dict(value) for name, value in saved.items()}
+    state = {name: dict(value) for name, value in (saved.items() if isinstance(saved, dict) else ())
+             if name in SUMMARIES and isinstance(value, dict)
+             and _finite_number(value.get('since')) and type(value.get('firing')) is bool
+             and isinstance(value.get('detail'), str)
+             and ('ended' not in value or _finite_number(value['ended']))}
     for name, condition in observed.items():
         if condition is None:
             continue

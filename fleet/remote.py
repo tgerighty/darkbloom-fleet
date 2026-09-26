@@ -178,7 +178,7 @@ def _manager_report(raw: str, pid: str, now: float, freshness_seconds: float) ->
 def _optional_integer(value: object) -> int:
     try:
         return max(0, int(value or 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -201,7 +201,7 @@ def _optional_float(payload: dict[str, object], key: str) -> float | None:
     value = payload.get(key)
     try:
         number = float(value) if value is not None else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if number is not None and math.isfinite(number) else None
 

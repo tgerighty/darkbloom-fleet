@@ -10,7 +10,7 @@ from itertools import pairwise
 from psycopg_pool import ConnectionPool
 
 from .attribution import provider_hosts, unattributed_recent, unique_payouts_sql
-from .card import build_card
+from .card import _snapshot_is_stale, build_card
 from .config import Config
 from .health import host_health
 from .hourly import hourly_jobs
@@ -383,7 +383,7 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
         "host": {"label": cfg.host_label, "spec": cfg.host_spec},
         "mode": "MONITOR",
         "current_model": daemon["current_model"] if daemon else None,
-        "daemon_fresh": daemon["fresh"] if daemon else False,
+        "daemon_fresh": not _snapshot_is_stale(daemon or {}, now, cfg.daemon_freshness_seconds),
         "inference_active": daemon["inference_active"] if daemon else None,
         "as_of": daemon["observed_at"] if daemon else None,
         "demand": demand,
