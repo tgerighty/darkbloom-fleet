@@ -376,18 +376,24 @@ def test_manager_demand_computes_ineligible_score_from_snapshot_inputs():
     assert preferred["qwen"]["manager_eligible"] is False and preferred["qwen"]["score"] == .5
 
 
-def test_unconfigured_host_ids_skips_configured_and_sorts():
-    class Pool:
-        def connection(self):
-            return self
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def execute(self, sql, params=None):
-            self.sql = sql
-            return self
-        def fetchall(self):
-            return [{"host": "m4-128-1"}, {"host": "M1-64-1"}, {"host": "m3-48-1"}]
+def test_unconfigured_host_ids_excludes_attestation_uuids(fake_pool):
+    rows = [{"host": f"00000000-0000-4000-8000-{n:012x}", "daemon": False}
+            for n in range(1153)]
+    rows += [{"host": host, "daemon": False}
+             for host in ("m4-128-1", "M1-64-1", "m3-48-1", "m4-128-1-extra")]
+    rows.append({"host": "legacy-mac", "daemon": True})
+    pool = fake_pool(rows)
 
-    assert queries.unconfigured_host_ids(Pool(), {"m3-48-1", "M1-64-1"}) == ["m4-128-1"]
+    assert queries.unconfigured_host_ids(pool, {"m3-48-1", "M1-64-1"}) == [
+        "legacy-mac", "m4-128-1",
+    ]
+    assert "provider_identities" in pool.calls[0][0]
+    assert "daemon_snapshots" in pool.calls[0][0]
+
+
+def test_unconfigured_host_ids_caps_extras_after_configured_hosts(fake_pool):
+    rows = [{"host": f"m5-64-{n}", "daemon": False} for n in range(1, 42)]
+    pool = fake_pool(rows)
+    extras = queries.unconfigured_host_ids(pool, {"m5-64-1"})
+    assert len(extras) == queries.MAX_DISCOVERED_HOSTS
+    assert "m5-64-1" not in extras

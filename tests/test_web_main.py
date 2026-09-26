@@ -1,5 +1,7 @@
 import asyncio
 import os
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -206,3 +208,25 @@ def test_status_appends_discovered_hosts_after_configured(monkeypatch):
     assert [row["host"]["label"] for row in body["hosts"]] == ["m3-48-1", "m4-128-1"]
     assert body["hosts"][1]["host"]["spec"] == "discovered"
     assert seen == ["m3-48-1", "m4-128-1"]
+
+
+def test_status_builds_host_rows_one_at_a_time(monkeypatch):
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def build(cfg, *_args):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.01)
+        with lock:
+            active -= 1
+        return {"label": cfg.host_label}
+
+    _patch_status(monkeypatch, build)
+    configs = tuple(SimpleNamespace(host_label=f"m{n}") for n in range(5))
+    app = web.create_app(configs, pool=None)
+    assert len(asyncio.run(_route(app, "/api/status").endpoint())["hosts"]) == 5
+    assert peak == 1

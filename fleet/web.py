@@ -68,8 +68,7 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     async def status() -> dict[str, list[queries.Row]]:
         # Attribution and the self-route view are account-wide: query once,
         # then every host row reads the same mapping. Host cards are the
-        # configured SSH collectors plus any provider_id / heartbeat host the
-        # account identity map already knows about.
+        # configured SSH collectors plus discovered Macs and heartbeat hosts.
         try:
             attributed, self_route = await asyncio.to_thread(queries.shared_status_data, pool)
             extras = await asyncio.to_thread(
@@ -79,9 +78,10 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
             log.exception("shared status data failed")
             return {"hosts": [_error_host(cfg) for cfg in configs]}
         display = _display_configs(configs, extras)
-        statuses = await asyncio.gather(
-            *(asyncio.to_thread(_status_row, cfg, pool, attributed, self_route) for cfg in display)
-        )
+        statuses = [
+            await asyncio.to_thread(_status_row, cfg, pool, attributed, self_route)
+            for cfg in display
+        ]
         hourly.share_legends(statuses)
         return {"hosts": list(statuses)}
 
@@ -99,7 +99,7 @@ def _configured_host_ids(configs: tuple[Config, ...]) -> set[str]:
 
 
 def _display_configs(configs: tuple[Config, ...], extra_ids: list[str]) -> list[object]:
-    """Configured hosts first (deploy order), then discovered provider ids.
+    """Configured hosts first (deploy order), then discovered hosts.
 
     Discovered rows are display-only: build_status only reads host_id/label/spec
     and the freshness/switch-cost knobs copied from the first configured host.
