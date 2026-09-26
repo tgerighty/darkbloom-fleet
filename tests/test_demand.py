@@ -46,6 +46,11 @@ def test_an_authenticated_request_refuses_redirects(monkeypatch):
     assert seen["handler"].redirect_request(None, None, 302, "Found", {}, "https://elsewhere") is None
 
 
+def test_public_request_can_use_http(monkeypatch):
+    monkeypatch.setattr(demand, "urlopen", lambda request, timeout: io.BytesIO(b'{"ok": true}'))
+    assert demand._get_json("http://example.test/data") == {"ok": True}
+
+
 def test_a_self_route_payload_of_the_wrong_shape_is_an_error_not_an_empty_listing(monkeypatch):
     monkeypatch.setattr(demand, "_get_json", lambda url, headers=None: ["nope"])
     with pytest.raises(TypeError, match="not a model listing"):
