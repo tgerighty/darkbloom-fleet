@@ -29,6 +29,11 @@ def test_fresh_and_serving_is_healthy(fake_pool):
                    "detail": "The daemon is fresh and no fault is detected."}
 
 
+def test_fresh_snapshot_at_configured_age_limit_is_healthy(fake_pool):
+    got = _check(fake_pool([]), _daemon(observed_at=NOW - 90))
+    assert got["state"] == health.HEALTHY
+
+
 def test_stale_one_minute_is_stale(fake_pool):
     got = _check(fake_pool([{"last_fresh": NOW - 60, "first_seen": NOW - 1000}], []), _daemon(fresh=False))
     assert got["state"] == health.STALE and got["since"] == NOW - 60
