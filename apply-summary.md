@@ -8,7 +8,7 @@ Base: `a3d3e98ec1c9398144f23d2b88de9e7f2d97b0e9` (`origin/main`). Scope: the sup
 | P1-2 duplicate payout | Use shared payout selection in the earnings profile; PostgreSQL check covers a null-hash copy. | `917be58` | `29f1982` |
 | P2-3 HTTP bearer request | Reject a non-HTTPS URL before opening an authenticated request. | `e608b71` | `41ba3b2` |
 | P2-5 payout backlog | Read at most 500 rows per SSH tick in row ID order. The stored maximum resumes the next tick. | `94d01e2` | `39826d1` |
-| P2-6 malformed manager report | Treat non-object `pending_switch` values as absent. | `29d7618` | `fd0363a`; Sonar refactor `fcbaa79` |
+| P2-6 malformed manager report | Treat non-object `pending_switch` values as absent. | `29d7618` | `fd0363a`; Sonar refactors `fcbaa79`, `0b99781` |
 | P2-8 database checks | Run the existing SQL and alert-delivery checks in a PostgreSQL-backed PR workflow. | Existing checks; null-hash case `917be58` | `ec9e3e9`, `625b62b` |
 
 Skipped:
