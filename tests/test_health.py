@@ -44,6 +44,12 @@ def test_stale_three_minutes_is_daemon_down(fake_pool):
     assert got["state"] == health.DAEMON_DOWN and got["since"] == NOW - 180
 
 
+def test_old_snapshot_marked_fresh_is_daemon_down(fake_pool):
+    got = _check(fake_pool([{"last_fresh": NOW - 180, "first_seen": NOW - 1000}]),
+                 _daemon(observed_at=NOW - 180))
+    assert got["state"] == health.DAEMON_DOWN and got["since"] == NOW - 180
+
+
 def test_dead_session(fake_pool):
     started = NOW - 31 * 60
     pool = fake_pool([{"n": 2, "other_served": True}])

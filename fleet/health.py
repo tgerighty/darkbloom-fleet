@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from psycopg_pool import ConnectionPool
 
+from .card import _snapshot_is_stale
+
 Row = dict[str, object]
 
 DAEMON_DOWN = "DAEMON_DOWN"
@@ -46,11 +48,12 @@ def _result(state: str, since: float, detail: str) -> Row:
     return {"state": state, "since": since, "detail": detail}
 
 
-def host_health(pool: ConnectionPool, host_id: str, daemon_row: Row | None, now: float) -> Row:
+def host_health(pool: ConnectionPool, host_id: str, daemon_row: Row | None, now: float,
+                freshness_seconds: float = 90.0) -> Row:
     snapshot = daemon_row or {}
     if not snapshot:
         return _result(STALE, now, "No daemon snapshot is available.")
-    if snapshot.get("fresh"):
+    if not _snapshot_is_stale(snapshot, now, freshness_seconds):
         return _dead_session(pool, host_id, snapshot, now) or _thrash(pool, host_id, now) or _healthy(snapshot, now)
     down = _down_or_stale(pool, host_id, now)
     if down["state"] == DAEMON_DOWN:
