@@ -83,7 +83,10 @@ async function loadStatus(signal) {
   const response = await fetch("/api/status", { signal });
   if (!response.ok) throw new Error("HTTP " + response.status);
   const data = await response.json();
-  if (!Array.isArray(data?.hosts)) throw new TypeError("status payload has no hosts array");
+  if (!Array.isArray(data?.hosts) || data.hosts.some(h => !h || typeof h !== "object" ||
+    (h.demand && (!Array.isArray(h.demand) || h.demand.some(r => !r || typeof r !== "object"))))) {
+    throw new TypeError("status payload has malformed hosts");
+  }
   return data;
 }
 

@@ -45,12 +45,16 @@ print(json.dumps({'provider_running': running('io.darkbloom.provider') or runnin
 
 
 def _switch_condition(status: dict[str, object], provider: bool, manager: bool) -> tuple[int, str] | bool | None:
+    warm = status.get('warm')
+    if not isinstance(warm, list) or not all(isinstance(model, str) for model in warm):
+        return None
     pending = status.get('pending')
     pending = pending if isinstance(pending, dict) else {}
     target = pending.get('target')
     recovered = provider and status.get('warm') == [target]
+    reason = status.get('reason')
     failed = target and not recovered and (pending.get('command_error') or
-                                         'automatic restart is blocked' in status.get('reason', ''))
+                                         'automatic restart is blocked' in (reason if isinstance(reason, str) else ''))
     if failed:
         return 0, f"Model manager failed to start {str(target)[:160]}. Check the manager log."
     return False if manager or recovered else None
@@ -60,10 +64,7 @@ def conditions(status):
     """None means unknown: retain an existing switch alert until a good read."""
     if status is not None and (not isinstance(status, dict)
             or any(type(status.get(key)) is not bool for key in
-                   ('provider_running', 'provider_fresh', 'manager_running', 'manager_fresh'))
-            or not isinstance(status.get('warm'), list)
-            or not all(isinstance(model, str) for model in status['warm'])
-            or not isinstance(status.get('reason'), str)):
+                   ('provider_running', 'provider_fresh', 'manager_running', 'manager_fresh'))):
         status = None
     if status is None:
         return {"DarkbloomProviderUnavailable": (GRACE, "Machine cannot be reached; provider status is unknown."),
