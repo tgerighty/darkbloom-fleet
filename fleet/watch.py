@@ -51,7 +51,8 @@ def conditions(status):
                 "DarkbloomManagerUnavailable": None, "DarkbloomManagerSwitchFailed": None}
     provider = status['provider_running'] and status['provider_fresh']
     manager = status['manager_running'] and status['manager_fresh']
-    pending = status.get('pending') or {}
+    pending = status.get('pending')
+    pending = pending if isinstance(pending, dict) else {}
     target = pending.get('target')
     recovered = provider and status.get('warm') == [target]
     failed = target and not recovered and (pending.get('command_error') or
