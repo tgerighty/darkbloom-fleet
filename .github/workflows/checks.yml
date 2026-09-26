@@ -9,7 +9,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_PASSWORD: ${{ github.run_id }}
         ports:
           - 5432:5432
         options: >-
@@ -18,7 +18,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/postgres
+      DATABASE_URL: postgresql://postgres:${{ github.run_id }}@127.0.0.1:5432/postgres
       DARKBLOOM_HOST_1_SSH_TARGET: test-m1
       PYTHONPATH: .
     steps:
