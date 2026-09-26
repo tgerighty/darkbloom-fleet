@@ -86,6 +86,15 @@ def test_missing_optional_reason_keeps_valid_provider_and_manager_signals():
     assert result['DarkbloomManagerUnavailable'] == (300, 'Model manager is stopped or its decisions are stale.')
 
 
+def test_missing_optional_warm_state_keeps_manager_outage_signal():
+    status = {'provider_running': True, 'provider_fresh': True, 'manager_running': False,
+              'manager_fresh': True, 'warm': None, 'pending': {'target': 'm'}, 'reason': ''}
+    result = conditions(status)
+    assert result['DarkbloomProviderUnavailable'] is False
+    assert result['DarkbloomManagerUnavailable'] == (300, 'Model manager is stopped or its decisions are stale.')
+    assert result['DarkbloomManagerSwitchFailed'] is None
+
+
 def test_malformed_saved_alert_does_not_block_valid_alert_delivery():
     saved = {'DarkbloomProviderUnavailable': {'since': 'bad', 'firing': False, 'detail': 'bad'},
              'DarkbloomManagerUnavailable': {'since': 1000, 'firing': True, 'detail': 'stopped'},

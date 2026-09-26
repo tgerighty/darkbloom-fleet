@@ -112,8 +112,9 @@ describe("dashboard poll and redraw", function () {
     expect(ctx.subtitle.innerHTML).toContain("status unavailable:");
   });
 
-  it("keeps the last good status when a successful response has no hosts array", async function () {
-    for (const malformed of [{}, null, { hosts: "bad" }]) {
+  it("keeps the last good status when a successful response has malformed hosts", async function () {
+    for (const malformed of [{}, null, { hosts: "bad" }, { hosts: [null] },
+      { hosts: [{ demand: {} }] }, { hosts: [{ demand: [null] }] }]) {
       const fetchFn = vi.fn().mockResolvedValueOnce(jsonOk({ hosts: [host("M3")] }))
         .mockResolvedValueOnce(jsonOk(malformed));
       const ctx = await boot({ fetch: fetchFn });
