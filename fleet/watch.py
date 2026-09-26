@@ -44,6 +44,17 @@ print(json.dumps({'provider_running': running('io.darkbloom.provider') or runnin
 '''
 
 
+def _switch_condition(status, provider, manager):
+    pending = status.get('pending')
+    pending = pending if isinstance(pending, dict) else {}
+    target = pending.get('target')
+    recovered = provider and status.get('warm') == [target]
+    failed = target and not recovered and (pending.get('command_error') or
+                                         'automatic restart is blocked' in status.get('reason', ''))
+    return ((0, f"Model manager failed to start {str(target)[:160]}. Check the manager log.") if failed
+            else (False if manager or recovered else None))
+
+
 def conditions(status):
     """None means unknown: retain an existing switch alert until a good read."""
     if status is None:
@@ -51,16 +62,10 @@ def conditions(status):
                 "DarkbloomManagerUnavailable": None, "DarkbloomManagerSwitchFailed": None}
     provider = status['provider_running'] and status['provider_fresh']
     manager = status['manager_running'] and status['manager_fresh']
-    pending = status.get('pending')
-    pending = pending if isinstance(pending, dict) else {}
-    target = pending.get('target')
-    recovered = provider and status.get('warm') == [target]
-    failed = target and not recovered and (pending.get('command_error') or
-                                         'automatic restart is blocked' in status.get('reason', ''))
     return {
         "DarkbloomProviderUnavailable": False if provider else (GRACE, "Provider is stopped or its heartbeat is stale."),
         "DarkbloomManagerUnavailable": False if manager else (GRACE, "Model manager is stopped or its decisions are stale."),
-        "DarkbloomManagerSwitchFailed": (0, f"Model manager failed to start {str(target)[:160]}. Check the manager log.") if failed else (False if manager or recovered else None),
+        "DarkbloomManagerSwitchFailed": _switch_condition(status, provider, manager),
     }
 
 
