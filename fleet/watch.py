@@ -49,15 +49,28 @@ def _switch_condition(status: dict[str, object], provider: bool, manager: bool) 
     pending = pending if isinstance(pending, dict) else {}
     target = pending.get('target')
     recovered = provider and status.get('warm') == [target]
+    reason = status.get('reason')
+    reason = reason if isinstance(reason, str) else ''
     failed = target and not recovered and (pending.get('command_error') or
-                                         'automatic restart is blocked' in status.get('reason', ''))
+                                         'automatic restart is blocked' in reason)
     if failed:
         return 0, f"Model manager failed to start {str(target)[:160]}. Check the manager log."
     return False if manager or recovered else None
 
 
+def _valid_warm(warm: object) -> bool:
+    return isinstance(warm, list) and all(isinstance(model, str) for model in warm)
+
+
+def _valid_probe(status: object) -> bool:
+    return isinstance(status, dict) and all(type(status.get(key)) is bool for key in
+                                            ('provider_running', 'provider_fresh', 'manager_running', 'manager_fresh'))
+
+
 def conditions(status):
     """None means unknown: retain an existing switch alert until a good read."""
+    if status is not None and not _valid_probe(status):
+        status = None
     if status is None:
         return {"DarkbloomProviderUnavailable": (GRACE, "Machine cannot be reached; provider status is unknown."),
                 "DarkbloomManagerUnavailable": None, "DarkbloomManagerSwitchFailed": None}
@@ -66,29 +79,57 @@ def conditions(status):
     return {
         "DarkbloomProviderUnavailable": False if provider else (GRACE, "Provider is stopped or its heartbeat is stale."),
         "DarkbloomManagerUnavailable": False if manager else (GRACE, "Model manager is stopped or its decisions are stale."),
-        "DarkbloomManagerSwitchFailed": _switch_condition(status, provider, manager),
+        "DarkbloomManagerSwitchFailed": (_switch_condition(status, provider, manager)
+                                         if _valid_warm(status.get('warm')) else None),
     }
 
 
-def transition(saved, observed, now):
-    state = {name: dict(value) for name, value in saved.items()}
+def _finite_number(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        dt.datetime.fromtimestamp(value, dt.timezone.utc)
+        return True
+    except (OverflowError, OSError, ValueError):
+        return False
+
+
+def _valid_record(value: object) -> bool:
+    return (isinstance(value, dict) and _finite_number(value.get('since'))
+            and type(value.get('firing')) is bool and isinstance(value.get('detail'), str)
+            and ('ended' not in value or _finite_number(value['ended'])))
+
+
+def _saved_state(saved: object) -> dict[str, dict[str, object]]:
+    if not isinstance(saved, dict):
+        return {}
+    return {name: dict(value) for name, value in saved.items()
+            if name in SUMMARIES and _valid_record(value)}
+
+
+def _advance_alert(state: dict[str, dict[str, object]], name: str,
+                   condition: tuple[int, str] | bool, now: float) -> None:
+    if condition is False:
+        item = state.get(name)
+        if item and item['firing']:
+            item.setdefault('ended', now)
+        else:
+            state.pop(name, None)
+        return
+    delay, detail = condition
+    if name not in state or 'ended' in state[name]:
+        state[name] = {'since': now, 'firing': False}
+    item = state[name]
+    item['detail'] = detail
+    item['firing'] = item['firing'] or now - item['since'] >= delay
+
+
+def transition(saved: object, observed: dict[str, tuple[int, str] | bool | None],
+               now: float) -> dict[str, dict[str, object]]:
+    state = _saved_state(saved)
     for name, condition in observed.items():
-        if condition is None:
-            continue
-        if condition is False:
-            if name in state:
-                if state[name]['firing']:
-                    state[name].setdefault('ended', now)
-                else:
-                    del state[name]
-            continue
-        delay, detail = condition
-        previous = state.get(name)
-        if previous is None or 'ended' in previous:
-            state[name] = {'since': now, 'firing': False}
-        item = state[name]
-        item['detail'] = detail
-        item['firing'] = item['firing'] or now - item['since'] >= delay
+        if condition is not None:
+            _advance_alert(state, name, condition, now)
     return state
 
 

@@ -1,3 +1,5 @@
+import { esc } from "./ui.js?v=8";
+
 // Terminal-style "Jobs · hourly buckets" panel: one row per hour (newest
 // first), with one character per 90-second portion of the hour.
 const BAR_WIDTH = 40;
@@ -11,10 +13,6 @@ const NL = "\n";
 const FOLD = '<details class="fold" open data-fold="hourly"><summary>Jobs · hourly buckets · 24 h</summary>' +
   '<div class="sub">Each letter is a payout-bearing 90-second portion, not GPU busy time.</div>';
 const EMPTY = { legend: [], rows: [] };
-
-function esc(value) {
-  return String(value).replaceAll(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[char]));
-}
 
 function span(slot, text) {
   return '<span class="m' + (slot % SLOTS) + '">' + text + "</span>";

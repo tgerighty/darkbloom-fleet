@@ -131,10 +131,10 @@ def test_serving_percentages_lifetime_empty_when_the_aggregate_has_no_since(fake
     assert queries.serving_percentages(pool, "h", 1200.0)["lifetime"] == {}
 
 
-def _status_responses(daemon, demand, decisions, card_totals=None, hourly=None):
+def _status_responses(daemon, demand, card_totals=None, hourly=None):
     """Canned rows in the order build_status queries them: daemon, demand,
     last-served, measured switch cost, earnings x2, bounded serving plus lifetime,
-    decisions, earnings rows, unattributed recent hashes, the card's session
+    earnings rows, unattributed recent hashes, the card's session
     payout totals, the hourly jobs buckets."""
     return [daemon, demand, [], [{"median": None, "n": 0}],
             [{"total": 2_500_000}], [{"total": 500_000}], [], [],
@@ -150,7 +150,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
     hourly = [{"hour": 7_200.0, "portion": 0, "model": "a", "n": 2}]
     attributed = {"s1": "m3", "s2": "other"}
     self_route = (None, {})
-    pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}], [{"action": "KEEP"}],
+    pool = fake_pool(*_status_responses([daemon], [{"model": "a", "ema_score": 0.2}],
                                         hourly=hourly))
     status = queries.build_status(
         SimpleNamespace(host_label="M3 label", host_id="m3", host_spec="M3 Max", live_execution=False,
@@ -224,13 +224,21 @@ def test_recent_and_unattributed_share_unique_ledger_rows(fake_pool):
 
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
-    pool = fake_pool(*_status_responses([], [], []))
+    pool = fake_pool(*_status_responses([], []))
     status = queries.build_status(SimpleNamespace(host_label="m1", host_id="m1", host_spec="?", live_execution=True,
                                                   switch_cost_seconds=300.0, daemon_freshness_seconds=90.0),
                                   pool, {}, (None, {}))
     assert status["current_model"] is None and status["mode"] == "MONITOR"
     assert status["serving"]["1h"] == {"idle": 100.0} and status["demand"] == []
     assert status["card"]["status"]["state"] == "OFF" and status["card"]["kpis"]["tokens"] == 4_000
+
+
+def test_build_status_expires_stored_fresh_flag(fake_pool, monkeypatch):
+    _clock(monkeypatch, 10_000.0)
+    daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_800.0}
+    pool = fake_pool(*_status_responses([daemon], []))
+    status = queries.build_status(_host_cfg("m1"), pool, {}, (None, {}))
+    assert status["daemon_fresh"] is False
 
 
 def test_shared_status_data_is_attribution_plus_self_route(fake_pool):
@@ -254,7 +262,7 @@ def _host_cfg(hid):
 
 def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
-    host_block = _status_responses([], [], [])
+    host_block = _status_responses([], [])
     pool = fake_pool(
         [],
         [],

@@ -21,7 +21,7 @@ def _optional_finite_float(row: dict[str, object], *keys: str) -> float | None:
             continue
         try:
             number = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
         if math.isfinite(number):
             return number
@@ -42,7 +42,7 @@ def pressure_from_capacity(row: object) -> CapacitySample | None:
     try:
         active = max(0, int(row.get("active_requests", row.get("in_progress", 0)) or 0))
         warm = max(0, int(row.get("warm_providers", row.get("loaded", 0)) or 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return CapacitySample(
         model=model, active_requests=active, warm_providers=warm,

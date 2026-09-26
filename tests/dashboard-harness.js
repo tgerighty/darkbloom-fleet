@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-export function nowSec() {
+function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
 
@@ -14,7 +14,6 @@ export function host(label, extra = {}) {
     demand: [{ model: "gemma", active_requests: 0, warm_providers: 1, pressure: 0,
       output_usd_per_million: 0, score: 0, ema_score: 0.1, observed_at: 1 }],
     serving: { "24h": { idle: 100 }, "1h": { gemma: 100 }, "7h": { idle: 100 } },
-    recent_decisions: [],
     recent_earnings: [],
     unattributed_recent: 0,
     card: {

@@ -11,8 +11,7 @@ from fleet.types import DaemonState, Payout, Slot
 
 
 def _state_output(daemon_json: str, widget_json: str = "", manager_json: str = "", manager_pid: str = "") -> str:
-    """What _STATE_COMMAND's single SSH round trip prints: the daemon doc, the
-    separator, then the widget's latest sample row (empty when absent)."""
+    """Build the four-field SSH response, including optional manager state and the running marker."""
     return (daemon_json + f"\n{remote._DOC_SEPARATOR}\n" + widget_json +
             f"\n{remote._DOC_SEPARATOR}\n" + manager_json +
             f"\n{remote._DOC_SEPARATOR}\n" + manager_pid)
@@ -184,6 +183,14 @@ def test_non_finite_widget_values_are_dropped():
     assert _optional_float({"x": float("nan")}, "x") is None
     assert _optional_float({"x": float("inf")}, "x") is None
     assert _optional_float({"x": "0.5"}, "x") == 0.5
+
+
+def test_overflowing_optional_values_do_not_discard_a_daemon_read(monkeypatch):
+    _capture(monkeypatch, _state_output('{"current_model": "a", "warm_models": ["a"], "written_at": 1000}',
+                                        '{"cpuUsage": 1e400}', '{"live_challenger_streak": 1e400}'))
+    state = remote.fetch_daemon_state(_cfg(), now=1010.0)
+    assert state.current_model == "a" and state.cpu_usage is None
+    assert state.manager["streak"] == 0
 
 
 def test_fetch_daemon_state_reads_last_model_load_error(monkeypatch):

@@ -8,6 +8,7 @@ def test_watch_failure_timing_restart_and_recovery():
                'warm': ['gemma'], 'manager_running': True, 'manager_fresh': True,
                'pending': None, 'reason': ''}
     assert transition({}, conditions(healthy), 1000) == {}
+    assert transition(None, conditions(healthy), 1000) == {}
     stopped = {**healthy, 'provider_running': False, 'manager_running': False}
     state = transition({}, conditions(stopped), 1000)
     assert payload('m1', state, 1299) == []
@@ -70,3 +71,38 @@ def test_malformed_pending_switch_keeps_provider_status():
         result = conditions({**status, 'pending': pending})
         assert result['DarkbloomProviderUnavailable'] is False
         assert result['DarkbloomManagerSwitchFailed'] is False
+
+
+def test_malformed_probe_cannot_claim_a_healthy_provider():
+    status = {'provider_running': 'yes', 'provider_fresh': True, 'manager_running': True,
+              'manager_fresh': True, 'warm': [], 'pending': None, 'reason': ''}
+    assert conditions(status)['DarkbloomProviderUnavailable'] is not False
+
+
+def test_missing_optional_reason_keeps_valid_provider_and_manager_signals():
+    status = {'provider_running': True, 'provider_fresh': True, 'manager_running': False,
+              'manager_fresh': True, 'warm': [], 'pending': {'target': 'm'}, 'reason': None}
+    result = conditions(status)
+    assert result['DarkbloomProviderUnavailable'] is False
+    assert result['DarkbloomManagerUnavailable'] == (300, 'Model manager is stopped or its decisions are stale.')
+
+
+def test_missing_optional_warm_state_keeps_manager_outage_signal():
+    status = {'provider_running': True, 'provider_fresh': True, 'manager_running': False,
+              'manager_fresh': True, 'warm': None, 'pending': {'target': 'm'}, 'reason': ''}
+    result = conditions(status)
+    assert result['DarkbloomProviderUnavailable'] is False
+    assert result['DarkbloomManagerUnavailable'] == (300, 'Model manager is stopped or its decisions are stale.')
+    assert result['DarkbloomManagerSwitchFailed'] is None
+
+
+def test_malformed_saved_alert_does_not_block_valid_alert_delivery():
+    saved = {'DarkbloomProviderUnavailable': {'since': 'bad', 'firing': False, 'detail': 'bad'},
+             'DarkbloomManagerUnavailable': {'since': 1000, 'firing': True, 'detail': 'stopped'},
+             'DarkbloomManagerSwitchFailed': {'since': 10**400, 'firing': True, 'detail': 'bad'},
+             'unknown': {'since': 1000, 'firing': True, 'detail': 'bad'}}
+    observed = {'DarkbloomProviderUnavailable': (300, 'provider stopped'),
+                'DarkbloomManagerUnavailable': None}
+    state = transition(saved, observed, 1300)
+    assert state['DarkbloomProviderUnavailable']['since'] == 1300
+    assert len(payload('m1', state, 1300)) == 1

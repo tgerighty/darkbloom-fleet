@@ -58,3 +58,9 @@ def test_pressure_from_capacity_accepts_bare_tps_aliases_and_skips_non_finite():
     assert sample.observed_prefill_tps == 10.0
     assert sample.observed_decode_tps is None
     assert sample.aggregate_tps is None
+
+
+def test_overflowing_optional_throughput_does_not_discard_capacity():
+    sample = pressure_from_capacity({"id": "m", "active_requests": 1, "warm_providers": 1,
+                                     "aggregate_tps": 10**400})
+    assert sample is not None and sample.aggregate_tps is None

@@ -1,28 +1,21 @@
-# Cleanup apply summary — 2026-09-26
+# CBA nine-domain apply — 2026-09-26
 
-Base: `a3d3e98ec1c9398144f23d2b88de9e7f2d97b0e9` (`origin/main`). Scope: the supplied cleanup report only.
+Base tip: `5d4b680cb3bfae8d98576c4fae27de7a2c47b0b2` (`origin/main`). Terry authorized safe narrative findings despite `verified: false` in the assessment JSON. Source: the nine files in `cleanup-reports/` only.
 
-| Finding | Result | Test commit | Change commit |
-|---|---|---|---|
-| P1-1 old fresh snapshot | Recheck age with the configured freshness limit before health classification. | `81f2d31` | `00adfbc` |
-| P1-2 duplicate payout | Use shared payout selection in the earnings profile; PostgreSQL check covers a null-hash copy. | `917be58` | `29f1982` |
-| P2-3 HTTP bearer request | Reject a non-HTTPS URL before opening an authenticated request. | `e608b71` | `41ba3b2` |
-| P2-5 payout backlog | Read at most 500 rows per SSH tick in row ID order. The stored maximum resumes the next tick. | `94d01e2` | `39826d1` |
-| P2-6 malformed manager report | Treat non-object `pending_switch` values as absent. | `29d7618` | `fd0363a`; Sonar refactors `fcbaa79`, `0b99781` |
-| P2-8 database checks | Run the existing SQL and alert-delivery checks in a PostgreSQL-backed PR workflow. | Existing checks; null-hash case `917be58` | `ec9e3e9`, `625b62b` |
+| Domain | Applied | Skipped or resolved |
+|---|---|---|
+| Dead code | dead-002, dead-004 | dead-001 and dead-003: external consumers need review. |
+| Legacy code | legacy-004, legacy-005 | legacy-001–003: external use or retention needs verification. |
+| AI slop | ai-slop-001–008: correct stale text | None. |
+| Deduplication | dedup-001 and dedup-003 | dedup-002: resolved upstream; dedup-004–008: keep separate. |
+| Type consolidation | None | type-001: review only; type-002: keep separate. |
+| Circular dependencies | None | No cycles in the assessment or current production import graph. |
+| Weak typing | WT-001 runtime guards, WT-002, WT-004 | WT-001 `TypedDict` expansion and WT-003/005/006/007: optional typing without a checker or confirmed external contract. |
+| Defensive programming | defensive-001–004 and 006 | defensive-001 health badge: resolved upstream; defensive-005: external earnings consumer and evidence contract unverified. |
+| LOC limits | None | loc-001 and 003: conditional later work; loc-002: exempt. |
 
-Skipped:
+RED commits: `19ff335` records the baseline assessments; `1dbed63` and `ad52109` add failing boundary regressions. GREEN commits: `02020c8` (subtractive), `07bb525` (structural), `235abf7` and `938cd2f` (boundary fixes). Per-item results and overlap handling are in the nine `*-apply-log.md` files. Existing tests covered the comment, fixture, and deduplication paths. The new tests reproduced the failures before production changes. Independent diff review found two edge cases, which were fixed and covered by tests.
 
-- P2-4: **YAGNI defer**. The report asks for production-sized `EXPLAIN ANALYZE` measurements before a retention or summary policy. No measured query budget is in the report.
-- P2-7: **YAGNI defer**. Pinning an image digest and package versions needs a planned update cadence. The report found no CVE or version to select.
-- P3 legacy schema: **defer** until the database retention review specified in the report.
-- P3 HTML escape duplication: **defer** until the hourly module changes, as the report recommends.
-- **NO-TEST-COVERAGE:** none of the applied items. Each has an existing or added covering check.
+Verification: baseline 208 Python and 65 Vitest tests passed; final 219 Python and 66 Vitest tests passed. Ruff core (`E4,E7,E9,F`), Python compilation, and `git diff --check` passed. This repo has no configured Python type checker. The cluster Vitest runner failed before executing tests (job `3de30dc3-592f-4960-862e-f48ac0e21576`, all shards exit 123 with empty logs); the local locked Vitest 5.0.0 suite passed. Runtime source and tests changed across 22 files, excluding assessment reports and apply logs.
 
-Verification:
-
-- Baseline Python suite: 202 passed. Final Python suite: 208 passed.
-- PostgreSQL: `tests/check_earnings_shadow.py` and `tests/check_watch_delivery.py` passed against a temporary local server.
-- Vitest: 6 files, 65 tests passed.
-- Ruff core checks (`E4,E7,E9,F`) and `compileall`: passed. The unrestricted Ruff run reports 13 findings; no project Ruff policy or type checker is configured.
-- Sonar: PR analysis pending at summary creation. Check the exact tip SHA after opening the PR.
+Remaining decisions: check external SQL use before removing `switch_lease` or decision history; confirm the earnings-profile consumer before changing missing-evidence output. The reports make serving and test-file splits conditional on later work. The open PR's exact-tip Sonar, CodeRabbit, and CI results are reported in the PR and final handoff.

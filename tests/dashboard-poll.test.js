@@ -105,10 +105,24 @@ describe("dashboard poll and redraw", function () {
       expect(aged.subtitle.innerHTML).toContain("showing data from never");
     });
 
-  it("does not render when the status payload is null", async function () {
+  it("reports a malformed first status without rendering", async function () {
     const ctx = await boot({ fetch: okFetch(null) });
     expect(ctx.hosts.html()).toBe("");
     expect(ctx.demand.html).toBe("");
+    expect(ctx.subtitle.innerHTML).toContain("status unavailable:");
+  });
+
+  it("keeps the last good status when a successful response has malformed hosts", async function () {
+    for (const malformed of [{}, null, { hosts: "bad" }, { hosts: [null] },
+      { hosts: [{ demand: {} }] }, { hosts: [{ demand: [null] }] }]) {
+      const fetchFn = vi.fn().mockResolvedValueOnce(jsonOk({ hosts: [host("M3")] }))
+        .mockResolvedValueOnce(jsonOk(malformed));
+      const ctx = await boot({ fetch: fetchFn });
+      await ctx.tick();
+      expect(ctx.hosts.html()).toContain('data-host="M3"');
+      expect(ctx.hosts.toggle).toHaveBeenLastCalledWith("stale-poll", true);
+      expect(ctx.subtitle.innerHTML).toContain("status unavailable:");
+    }
   });
 
   it("shows a first-poll failure, then a singular host count after recovery", async function () {
@@ -191,7 +205,7 @@ describe("dashboard poll and redraw", function () {
     async function () {
       const t0 = 1_700_000_000_000;
       const fetchFn = vi.fn();
-      fetchFn.mockResolvedValueOnce(jsonOk({}));
+      fetchFn.mockResolvedValueOnce(jsonOk({ hosts: [] }));
       fetchFn.mockRejectedValueOnce(new Error("later"));
       fetchFn.mockRejectedValueOnce(new Error("later"));
       const ctx = await boot({ fetch: fetchFn, noServing: true, now: t0 });
