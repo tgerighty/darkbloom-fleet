@@ -51,3 +51,22 @@ def test_switch_error_alerts_immediately_but_normal_warmup_does_not():
     status['pending'].pop('command_error')
     status['reason'] = 'model loading exceeded 3m; automatic restart is blocked'
     assert conditions(status)['DarkbloomManagerSwitchFailed']
+
+
+def test_empty_pending_switch_keeps_healthy_provider_state():
+    status = {'provider_running': True, 'provider_fresh': True,
+              'manager_running': True, 'manager_fresh': True,
+              'pending': [], 'warm': [], 'reason': ''}
+    result = conditions(status)
+    assert result['DarkbloomProviderUnavailable'] is False
+    assert result['DarkbloomManagerSwitchFailed'] is False
+
+
+def test_malformed_pending_switch_keeps_provider_status():
+    status = {'provider_running': True, 'provider_fresh': True,
+              'manager_running': True, 'manager_fresh': True,
+              'warm': [], 'reason': ''}
+    for pending in ('broken', [1]):
+        result = conditions({**status, 'pending': pending})
+        assert result['DarkbloomProviderUnavailable'] is False
+        assert result['DarkbloomManagerSwitchFailed'] is False

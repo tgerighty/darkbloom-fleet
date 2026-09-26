@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .scoring import pressure_from_capacity
@@ -24,6 +25,8 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def _get_json(url: str, headers: dict[str, str] | None = None) -> Json:
+    if headers and urlsplit(url).scheme != "https":
+        raise ValueError("authenticated requests require HTTPS")
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT, **(headers or {})})
     opener = build_opener(_NoRedirect()).open if headers else urlopen
     with opener(request, timeout=20) as response:

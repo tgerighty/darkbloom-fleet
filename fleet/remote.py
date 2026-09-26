@@ -32,6 +32,7 @@ _STATE_COMMAND = (
 _INVENTORY_COMMAND = f"{DARKBLOOM_BIN} models list --all --json"
 _MAX_INSTALLED_MODELS = 256
 _MAX_MODEL_ID_LENGTH = 256
+PAYOUT_BATCH_SIZE = 500
 
 _PAYOUTS_SNIPPET = """
 import json, sqlite3
@@ -39,7 +40,7 @@ from pathlib import Path
 db = sqlite3.connect((Path.home() / {db_path!r}).expanduser().as_uri() + "?mode=ro", uri=True)
 rows = db.execute(
     "SELECT rowid, model, completion_tokens, micro_usd, created_at, provider_hash FROM payouts "
-    "WHERE rowid > ? ORDER BY rowid", ({since_rowid},)
+    "WHERE rowid > ? ORDER BY rowid LIMIT ?", ({since_rowid}, {batch_size})
 ).fetchall()
 print(json.dumps(rows))
 """
@@ -261,7 +262,8 @@ def _model_ids(payload: dict[str, object], key: str) -> tuple[str, ...]:
 
 def fetch_new_payouts(cfg: Config, since_rowid: int) -> list[Payout]:
     """Ground-truth $/model/hour, read-only, from the real payouts ledger."""
-    script = _PAYOUTS_SNIPPET.format(db_path=EARNINGS_DB_PATH.removeprefix("~/"), since_rowid=int(since_rowid))
+    script = _PAYOUTS_SNIPPET.format(db_path=EARNINGS_DB_PATH.removeprefix("~/"),
+                                     since_rowid=int(since_rowid), batch_size=PAYOUT_BATCH_SIZE)
     remote_command = f"{shlex.quote(cfg.remote_python)} - <<'PY'\n{script}\nPY"
     raw = _run_ssh(cfg, remote_command, timeout=20)
     rows = json.loads(raw)

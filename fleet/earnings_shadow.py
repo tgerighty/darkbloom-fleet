@@ -8,6 +8,7 @@ import shlex
 import time
 
 from . import remote
+from .attribution import unique_payouts_sql
 
 log = logging.getLogger('fleet.earnings_shadow')
 WINDOW = 86400
@@ -34,14 +35,12 @@ FROM intervals i LEFT JOIN LATERAL (
 ) d ON true GROUP BY i.model
 """
 
-PAYOUT_SQL = """
+PAYOUT_SQL = f"""
 WITH identities AS (
  SELECT provider_hash, min(host) host FROM provider_identities
  GROUP BY provider_hash HAVING count(DISTINCT host) = 1
 ), payouts AS (
- SELECT DISTINCT ON (payout_rowid) provider_hash, model, micro_usd
- FROM earnings WHERE created_at BETWEEN %s AND %s AND model != 'base_reward'
- ORDER BY payout_rowid
+ {unique_payouts_sql('provider_hash, model, micro_usd', "created_at BETWEEN %s AND %s AND model != 'base_reward'")}
 )
 SELECT e.model, count(*) paid_requests, sum(micro_usd)/1000000.0 inference_usd
 FROM payouts e JOIN identities i USING (provider_hash)

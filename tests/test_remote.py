@@ -154,7 +154,7 @@ def test_malformed_capacity_and_slots_leave_the_read_intact(monkeypatch):
 def test_fetch_new_payouts_reads_rows_after_the_given_rowid(monkeypatch):
     commands = _capture(monkeypatch, '[[8, "a", null, 30, 1.5, "session-1"]]')
     assert remote.fetch_new_payouts(_cfg(), since_rowid=7) == [Payout(8, "a", 0, 30, 1.5, "session-1")]
-    assert "(7,)" in commands[0]
+    assert f"(7, {remote.PAYOUT_BATCH_SIZE})" in commands[0]
 
 
 def test_empty_provider_hash_is_stored_as_null(monkeypatch):
@@ -226,11 +226,14 @@ def test_ledger_ingestion_includes_base_rewards(tmp_path, capsys):
             (1, "base_reward", 0, 2000, 10.0, "m1"),
             (2, "nemotron", 100, 30, 11.0, "m1"),
             (3, "base_reward", 0, 1800, 12.0, "m3"),
+            (4, "nemotron", 10, 50, 13.0, "m1"),
         ])
-    exec(remote._PAYOUTS_SNIPPET.format(db_path=str(ledger), since_rowid=0))
+    exec(remote._PAYOUTS_SNIPPET.format(db_path=str(ledger), since_rowid=0, batch_size=2))
     rows = json.loads(capsys.readouterr().out)
-    assert [row[0] for row in rows] == [1, 2, 3]
+    assert [row[0] for row in rows] == [1, 2]
     assert sum(row[3] for row in rows if row[5] == "m1") == 2030
+    exec(remote._PAYOUTS_SNIPPET.format(db_path=str(ledger), since_rowid=2, batch_size=2))
+    assert [row[0] for row in json.loads(capsys.readouterr().out)] == [3, 4]
 
 
 def test_manager_report_preserves_score_snapshot():
