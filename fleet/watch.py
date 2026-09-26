@@ -45,9 +45,6 @@ print(json.dumps({'provider_running': running('io.darkbloom.provider') or runnin
 
 
 def _switch_condition(status: dict[str, object], provider: bool, manager: bool) -> tuple[int, str] | bool | None:
-    warm = status.get('warm')
-    if not _valid_warm(warm):
-        return None
     pending = status.get('pending')
     pending = pending if isinstance(pending, dict) else {}
     target = pending.get('target')
@@ -82,7 +79,8 @@ def conditions(status):
     return {
         "DarkbloomProviderUnavailable": False if provider else (GRACE, "Provider is stopped or its heartbeat is stale."),
         "DarkbloomManagerUnavailable": False if manager else (GRACE, "Model manager is stopped or its decisions are stale."),
-        "DarkbloomManagerSwitchFailed": _switch_condition(status, provider, manager),
+        "DarkbloomManagerSwitchFailed": (_switch_condition(status, provider, manager)
+                                         if _valid_warm(status.get('warm')) else None),
     }
 
 
@@ -110,9 +108,7 @@ def _saved_state(saved: object) -> dict[str, dict[str, object]]:
 
 
 def _advance_alert(state: dict[str, dict[str, object]], name: str,
-                   condition: tuple[int, str] | bool | None, now: float) -> None:
-    if condition is None:
-        return
+                   condition: tuple[int, str] | bool, now: float) -> None:
     if condition is False:
         item = state.get(name)
         if item and item['firing']:
@@ -132,7 +128,8 @@ def transition(saved: object, observed: dict[str, tuple[int, str] | bool | None]
                now: float) -> dict[str, dict[str, object]]:
     state = _saved_state(saved)
     for name, condition in observed.items():
-        _advance_alert(state, name, condition, now)
+        if condition is not None:
+            _advance_alert(state, name, condition, now)
     return state
 
 
