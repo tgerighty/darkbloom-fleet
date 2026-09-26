@@ -4,6 +4,7 @@ writes so each file stays small and single-purpose.
 from __future__ import annotations
 
 import math
+import re
 import time
 from itertools import pairwise
 
@@ -18,6 +19,7 @@ from .routability import latest_self_route, routability_panel
 
 DAY_SECONDS = 86_400
 OUTAGE_GAP_SECONDS = 600
+MAX_DISCOVERED_HOSTS = 32
 # Dashboard serving windows; None = lifetime (since the first snapshot).
 SERVING_WINDOWS: dict[str, float | None] = {
     "1h": 3600, "7h": 7 * 3600, "24h": DAY_SECONDS, "30d": 30 * DAY_SECONDS, "lifetime": None,
@@ -365,18 +367,21 @@ def serving_percentages(pool: ConnectionPool, host: str, now: float) -> dict[str
 
 
 def known_host_ids(pool: ConnectionPool) -> list[str]:
-    """Hosts seen via verified provider identity or collector heartbeats."""
+    """Collector hosts and Mac-shaped account provider IDs."""
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT host FROM provider_identities "
-            "UNION SELECT host FROM daemon_snapshots"
+            "SELECT host, false AS daemon FROM provider_identities "
+            "UNION SELECT host, true AS daemon FROM daemon_snapshots"
         ).fetchall()
-    return sorted({str(row["host"]) for row in rows if row.get("host")})
+    return sorted({
+        host for row in rows if isinstance(host := row.get("host"), str)
+        and (row["daemon"] or re.fullmatch(r"m[0-9]+-[0-9]+-[0-9]+", host, re.IGNORECASE))
+    })
 
 
 def unconfigured_host_ids(pool: ConnectionPool, configured: set[str]) -> list[str]:
     """Discovered hosts not already driven by DARKBLOOM_HOST_N_* (sorted)."""
-    return [host for host in known_host_ids(pool) if host not in configured]
+    return [host for host in known_host_ids(pool) if host not in configured][:MAX_DISCOVERED_HOSTS]
 
 
 def shared_status_data(
