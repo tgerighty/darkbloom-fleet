@@ -374,3 +374,20 @@ def test_manager_demand_computes_ineligible_score_from_snapshot_inputs():
     preferred = {r["model"]: r for r in queries.manager_demand(daemon, [], 1010)}
     assert preferred["oss"]["manager_eligible"] is True and preferred["oss"]["score"] == .2
     assert preferred["qwen"]["manager_eligible"] is False and preferred["qwen"]["score"] == .5
+
+
+def test_unconfigured_host_ids_skips_configured_and_sorts():
+    class Pool:
+        def connection(self):
+            return self
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def execute(self, sql, params=None):
+            self.sql = sql
+            return self
+        def fetchall(self):
+            return [{"host": "m4-128-1"}, {"host": "M1-64-1"}, {"host": "m3-48-1"}]
+
+    assert queries.unconfigured_host_ids(Pool(), {"m3-48-1", "M1-64-1"}) == ["m4-128-1"]

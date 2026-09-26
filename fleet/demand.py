@@ -107,25 +107,59 @@ def resolve_prices(models: tuple[str, ...], prices: dict[str, float], fallback: 
     return {m: prices.get(m, fallback) for m in models if prices.get(m, fallback) > 0}
 
 
-def fetch_provider_hashes(base_url: str, api_key: str, public_key: str) -> set[str]:
-    """Join this Mac's attestation to account payout identities, never job timing."""
-    if not public_key:
-        return set()
+def _provider_identity_lists(base_url: str, api_key: str) -> tuple[list[object], list[object]]:
+    """Account attestation providers and recent account-earnings rows."""
     headers = {"Authorization": f"Bearer {api_key}"}
     proof = _get_json(f"{base_url.rstrip('/')}/v1/providers/attestation", headers)
     earnings = _get_json(f"{base_url.rstrip('/')}/v1/provider/account-earnings?limit=1000", headers)
     if (not isinstance(proof, dict) or not isinstance(proof.get("providers"), list)
             or not isinstance(earnings, dict) or not isinstance(earnings.get("earnings"), list)):
         raise ValueError("provider identity response is malformed")
-    providers = {p["provider_id"] for p in proof["providers"]
-                 if isinstance(p, dict) and p.get("se_public_key") == public_key
-                 and isinstance(p.get("provider_id"), str) and p["provider_id"]}
-    hashes = set()
-    for payout in earnings["earnings"]:
+    return proof["providers"], earnings["earnings"]
+
+
+def _provider_ids(providers: list[object], *, public_key: str | None = None) -> set[str]:
+    """Darkbloom provider_id values, optionally filtered to one SE public key."""
+    ids: set[str] = set()
+    for row in providers:
+        if not isinstance(row, dict) or not isinstance(row.get("provider_id"), str) or not row["provider_id"]:
+            continue
+        if public_key is not None and row.get("se_public_key") != public_key:
+            continue
+        ids.add(row["provider_id"])
+    return ids
+
+
+def _hash_to_provider_id(provider_ids: set[str], earnings: list[object]) -> dict[str, str]:
+    """Map payout provider_hash → provider_id. Every listed provider_id also gets
+    sha256(provider_id) so hosts with no payouts yet still appear."""
+    hosts: dict[str, str] = {
+        hashlib.sha256(pid.encode()).hexdigest(): pid for pid in provider_ids
+    }
+    for payout in earnings:
         if (not isinstance(payout, dict) or not isinstance(payout.get("provider_id"), str)
-                or payout["provider_id"] not in providers):
+                or payout["provider_id"] not in provider_ids):
             continue
         key = payout.get("provider_key") or payout.get("provider_id")
         if isinstance(key, str) and key:
-            hashes.add(hashlib.sha256(key.encode()).hexdigest())
-    return hashes
+            hosts[hashlib.sha256(key.encode()).hexdigest()] = payout["provider_id"]
+    return hosts
+
+
+def fetch_account_provider_hosts(base_url: str, api_key: str) -> dict[str, str]:
+    """Map every account payout provider_hash to its Darkbloom provider_id.
+
+    provider_id is the stable host identity on the dashboard (same string as
+    DARKBLOOM_HOST_<N>_ID when that Mac is also SSH-collected). No per-Mac
+    attestation key is required: the account listing discovers every provider.
+    """
+    providers, earnings = _provider_identity_lists(base_url, api_key)
+    return _hash_to_provider_id(_provider_ids(providers), earnings)
+
+
+def fetch_provider_hashes(base_url: str, api_key: str, public_key: str) -> set[str]:
+    """Join this Mac's attestation to account payout identities, never job timing."""
+    if not public_key:
+        return set()
+    providers, earnings = _provider_identity_lists(base_url, api_key)
+    return set(_hash_to_provider_id(_provider_ids(providers, public_key=public_key), earnings))

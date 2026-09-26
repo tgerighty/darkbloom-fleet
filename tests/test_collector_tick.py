@@ -91,7 +91,7 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector.db, "save_ema", record("save_ema"))
     monkeypatch.setattr(collector.db, "insert_demand_samples", record("samples"))
     monkeypatch.setattr(collector, "_ingest_earnings", record("earnings"))
-    monkeypatch.setattr(collector, "_ingest_provider_identity", record("identity"))
+    monkeypatch.setattr(collector, "_ingest_account_provider_identities", record("identity"))
     collector.run_tick(_cfg(live_execution=True), None)
     assert calls == ["snapshot", "probe", "earnings", "identity", "delete_ema", "save_ema", "samples"]
 

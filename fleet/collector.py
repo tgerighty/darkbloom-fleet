@@ -70,18 +70,23 @@ def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
     db.insert_payouts(pool, host, payouts, now)
 
 
-def _ingest_provider_identity(cfg: Config, pool: ConnectionPool, daemon: DaemonState | None) -> None:
-    if not (cfg.api_key and daemon and daemon.fresh and daemon.attestation_public_key):
+def _ingest_account_provider_identities(cfg: Config, pool: ConnectionPool) -> None:
+    """Persist hash→provider_id for every account provider. Probe host only:
+    the attestation listing is account-wide, so one tick discovers new Macs
+    (e.g. m4-128-1) without a DARKBLOOM_HOST_N_* slot or SSH to that Mac."""
+    if not (cfg.probe_self_route and cfg.api_key):
         return
     try:
-        hashes = demand.fetch_provider_hashes(cfg.base_url, cfg.api_key, daemon.attestation_public_key)
+        hosts = demand.fetch_account_provider_hosts(cfg.base_url, cfg.api_key)
+        if not hosts:
+            return
         with pool.connection() as conn:
             conn.cursor().executemany(
                 "INSERT INTO provider_identities (provider_hash, host) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                [(digest, cfg.host_id) for digest in sorted(hashes)],
+                sorted(hosts.items()),
             )
     except Exception:  # identity failure must not stop ingestion or expose authenticated responses
-        log.warning("provider payout identity unavailable for %s", cfg.host_id)
+        log.warning("account provider identity unavailable")
 
 
 def _probe_self_route(cfg: Config, pool: ConnectionPool, now: float) -> None:
@@ -118,10 +123,10 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     now = time.time()
     host = cfg.host_id
 
-    daemon, installed = _persist_tick_daemon(cfg, pool, host, now)
+    _daemon, installed = _persist_tick_daemon(cfg, pool, host, now)
     _probe_self_route(cfg, pool, now)
     _ingest_earnings(cfg, pool, now)
-    _ingest_provider_identity(cfg, pool, daemon)
+    _ingest_account_provider_identities(cfg, pool)
 
     eligible = _eligible_models(cfg.models, installed)
     db.delete_ineligible_ema(pool, host, eligible)
