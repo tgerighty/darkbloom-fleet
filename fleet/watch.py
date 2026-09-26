@@ -46,18 +46,23 @@ print(json.dumps({'provider_running': running('io.darkbloom.provider') or runnin
 
 def _switch_condition(status: dict[str, object], provider: bool, manager: bool) -> tuple[int, str] | bool | None:
     warm = status.get('warm')
-    if not isinstance(warm, list) or not all(isinstance(model, str) for model in warm):
+    if not _valid_warm(warm):
         return None
     pending = status.get('pending')
     pending = pending if isinstance(pending, dict) else {}
     target = pending.get('target')
     recovered = provider and status.get('warm') == [target]
     reason = status.get('reason')
+    reason = reason if isinstance(reason, str) else ''
     failed = target and not recovered and (pending.get('command_error') or
-                                         'automatic restart is blocked' in (reason if isinstance(reason, str) else ''))
+                                         'automatic restart is blocked' in reason)
     if failed:
         return 0, f"Model manager failed to start {str(target)[:160]}. Check the manager log."
     return False if manager or recovered else None
+
+
+def _valid_warm(warm: object) -> bool:
+    return isinstance(warm, list) and all(isinstance(model, str) for model in warm)
 
 
 def _valid_probe(status: object) -> bool:
@@ -97,24 +102,23 @@ def _valid_record(value: object) -> bool:
             and ('ended' not in value or _finite_number(value['ended'])))
 
 
-def _saved_state(saved):
+def _saved_state(saved: object) -> dict[str, dict[str, object]]:
     if not isinstance(saved, dict):
         return {}
     return {name: dict(value) for name, value in saved.items()
             if name in SUMMARIES and _valid_record(value)}
 
 
-def _advance_alert(state, name, condition, now):
+def _advance_alert(state: dict[str, dict[str, object]], name: str,
+                   condition: tuple[int, str] | bool | None, now: float) -> None:
     if condition is None:
         return
     if condition is False:
         item = state.get(name)
-        if item is None:
-            return
-        if item['firing']:
+        if item and item['firing']:
             item.setdefault('ended', now)
         else:
-            del state[name]
+            state.pop(name, None)
         return
     delay, detail = condition
     if name not in state or 'ended' in state[name]:
@@ -124,7 +128,8 @@ def _advance_alert(state, name, condition, now):
     item['firing'] = item['firing'] or now - item['since'] >= delay
 
 
-def transition(saved, observed, now):
+def transition(saved: object, observed: dict[str, tuple[int, str] | bool | None],
+               now: float) -> dict[str, dict[str, object]]:
     state = _saved_state(saved)
     for name, condition in observed.items():
         _advance_alert(state, name, condition, now)
