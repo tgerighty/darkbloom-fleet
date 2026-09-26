@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 import re
 import time
+from bisect import bisect_right
 from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
@@ -313,21 +314,17 @@ def _window_shares(snapshots: list[Row], window_seconds: float | None, now: floa
     """Reduce one ordered history to a window. None = since the first snapshot.
     The latest row at or before `since` is the state already in force; later
     rows fill the window. Every window of one status row uses the same `now`."""
-    snapshots = [snap for snap in snapshots if float(snap["observed_at"]) <= now]
+    observed_at = lambda snap: float(snap["observed_at"])
+    end = bisect_right(snapshots, now, key=observed_at)
     if window_seconds is not None:
         since = now - window_seconds
-    elif not snapshots:
+    elif not end:
         return {}
     else:
-        since = min(float(row["observed_at"]) for row in snapshots)
-    before = None
-    after: list[Row] = []
-    for snap in snapshots:
-        if snap["observed_at"] <= since:
-            before = snap
-        else:
-            after.append(snap)
-    return _serving_shares(([before] if before else []) + after, since, now)
+        since = observed_at(snapshots[0])
+    start = bisect_right(snapshots, since, 0, end, key=observed_at)
+    rows = ([snapshots[start - 1]] if start else []) + snapshots[start:end]
+    return _serving_shares(rows, since, now)
 
 
 def _lifetime_shares(rows: list[Row], now: float) -> dict[str, float]:
@@ -386,13 +383,14 @@ def unconfigured_host_ids(pool: ConnectionPool, configured: set[str]) -> list[st
 
 def shared_status_data(
     pool: ConnectionPool,
-) -> tuple[dict[str, str], tuple[float | None, dict[str, int]]]:
-    """Account-wide maps shared by every host row of one /api/status."""
-    return provider_hosts(pool), latest_self_route(pool)
+) -> tuple[dict[str, str], tuple[float | None, dict[str, int]], int]:
+    """Account-wide status data shared by every host row of one /api/status."""
+    attributed = provider_hosts(pool)
+    return attributed, latest_self_route(pool), unattributed_recent(pool, attributed, time.time())
 
 
 def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
-                 self_route: tuple[float | None, dict[str, int]]) -> Row:
+                 self_route: tuple[float | None, dict[str, int]], unattributed: int) -> Row:
     host = cfg.host_id
     daemon = latest_daemon(pool, host)
     now = time.time()
@@ -411,7 +409,7 @@ def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
         "earnings_usd_1h": round(earnings_usd(pool, now - 3600, now, hashes), 4),
         "serving": serving_percentages(pool, host, now),
         "recent_earnings": recent_earnings(pool, now, hashes),
-        "unattributed_recent": unattributed_recent(pool, attributed, now),
+        "unattributed_recent": unattributed,
         "routability": routability,
         "card": build_card(pool, host, daemon, routability["last_served_at"], hashes, now,
                            cfg.daemon_freshness_seconds),

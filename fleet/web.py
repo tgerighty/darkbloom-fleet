@@ -70,7 +70,7 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
         # then every host row reads the same mapping. Host cards are the
         # configured SSH collectors plus discovered Macs and heartbeat hosts.
         try:
-            attributed, self_route = await asyncio.to_thread(queries.shared_status_data, pool)
+            attributed, self_route, unattributed = await asyncio.to_thread(queries.shared_status_data, pool)
             extras = await asyncio.to_thread(
                 queries.unconfigured_host_ids, pool, _configured_host_ids(configs),
             )
@@ -79,7 +79,7 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
             return {"hosts": [_error_host(cfg) for cfg in configs]}
         display = _display_configs(configs, extras)
         statuses = [
-            await asyncio.to_thread(_status_row, cfg, pool, attributed, self_route)
+            await asyncio.to_thread(_status_row, cfg, pool, attributed, self_route, unattributed)
             for cfg in display
         ]
         hourly.share_legends(statuses)
@@ -144,9 +144,9 @@ def _error_host(cfg: Config) -> queries.Row:
 
 
 def _status_row(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
-                self_route: tuple[float | None, dict[str, int]]) -> queries.Row:
+                self_route: tuple[float | None, dict[str, int]], unattributed: int) -> queries.Row:
     try:
-        return queries.build_status(cfg, pool, attributed, self_route)
+        return queries.build_status(cfg, pool, attributed, self_route, unattributed)
     except Exception:
         log.exception("host status failed: %s", getattr(cfg, "host_label", "host"))
         return _error_host(cfg)
