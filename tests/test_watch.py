@@ -8,6 +8,7 @@ def test_watch_failure_timing_restart_and_recovery():
                'warm': ['gemma'], 'manager_running': True, 'manager_fresh': True,
                'pending': None, 'reason': ''}
     assert transition({}, conditions(healthy), 1000) == {}
+    assert transition(None, conditions(healthy), 1000) == {}
     stopped = {**healthy, 'provider_running': False, 'manager_running': False}
     state = transition({}, conditions(stopped), 1000)
     assert payload('m1', state, 1299) == []
@@ -98,6 +99,7 @@ def test_missing_optional_warm_state_keeps_manager_outage_signal():
 def test_malformed_saved_alert_does_not_block_valid_alert_delivery():
     saved = {'DarkbloomProviderUnavailable': {'since': 'bad', 'firing': False, 'detail': 'bad'},
              'DarkbloomManagerUnavailable': {'since': 1000, 'firing': True, 'detail': 'stopped'},
+             'DarkbloomManagerSwitchFailed': {'since': 10**400, 'firing': True, 'detail': 'bad'},
              'unknown': {'since': 1000, 'firing': True, 'detail': 'bad'}}
     observed = {'DarkbloomProviderUnavailable': (300, 'provider stopped'),
                 'DarkbloomManagerUnavailable': None}
