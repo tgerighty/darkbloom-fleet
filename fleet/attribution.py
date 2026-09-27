@@ -12,6 +12,7 @@ from __future__ import annotations
 from psycopg_pool import ConnectionPool
 
 Row = dict[str, object]
+DAY_SECONDS = 86_400
 
 # One row per (payout_rowid, host) whose request counter rose across the
 # snapshot interval containing that payout (prev is the greatest snapshot
@@ -24,7 +25,8 @@ Row = dict[str, object]
 _VOTES_SQL = """
 WITH payout AS (
     SELECT DISTINCT payout_rowid, provider_hash, created_at FROM earnings e
-    WHERE provider_hash IS NOT NULL AND provider_hash <> '' AND model != 'base_reward'
+    WHERE created_at > %s AND created_at <= %s
+      AND provider_hash IS NOT NULL AND provider_hash <> '' AND model != 'base_reward'
       AND NOT EXISTS (SELECT 1 FROM provider_identities i WHERE i.provider_hash = e.provider_hash)
 ), hosts AS (SELECT DISTINCT host FROM daemon_snapshots)
 SELECT p.payout_rowid, p.provider_hash, h.host
@@ -85,10 +87,10 @@ def _attributed_from_votes(rows: list[Row]) -> dict[str, str]:
     return _unique_vote_leaders(votes)
 
 
-def provider_hosts(pool: ConnectionPool) -> dict[str, str]:
+def provider_hosts(pool: ConnectionPool, now: float) -> dict[str, str]:
     """Exact identities override counter votes; conflicting identities stay unassigned."""
     with pool.connection() as conn:
-        rows = conn.execute(_VOTES_SQL).fetchall()
+        rows = conn.execute(_VOTES_SQL, (now - DAY_SECONDS, now)).fetchall()
         identities = conn.execute("SELECT provider_hash, host FROM provider_identities").fetchall()
     attributed = _attributed_from_votes(rows)
     exact: dict[str, set[str]] = {}

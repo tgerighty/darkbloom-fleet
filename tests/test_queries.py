@@ -249,7 +249,8 @@ def test_build_status_expires_stored_fresh_flag(fake_pool, monkeypatch):
     assert status["daemon_fresh"] is False
 
 
-def test_shared_status_data_includes_one_account_wide_unattributed_count(fake_pool):
+def test_shared_status_data_includes_one_account_wide_unattributed_count(fake_pool, monkeypatch):
+    _clock(monkeypatch, 100_000.0)
     pool = fake_pool(
         [{"payout_rowid": 1, "provider_hash": "s1", "host": "m3"}],
         [],
@@ -262,6 +263,8 @@ def test_shared_status_data_includes_one_account_wide_unattributed_count(fake_po
     assert self_route == (100.0, {"a": 1})
     assert unattributed == 1
     assert len(pool.calls) == 5
+    assert pool.calls[0] == (attribution._VOTES_SQL, (100_000.0 - queries.DAY_SECONDS, 100_000.0))
+    assert pool.calls[-1][1] == (100_000.0, 50, 50)
 
 
 def _host_cfg(hid):
