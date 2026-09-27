@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS provider_identities (
     host TEXT NOT NULL,
     PRIMARY KEY (provider_hash, host)
 );
+-- Darkbloom provider_id (UUID) -> configured fleet host_id for dashboard join.
+CREATE TABLE IF NOT EXISTS provider_fleet_hosts (
+    provider_id TEXT PRIMARY KEY,
+    fleet_host TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS provider_fleet_hosts_fleet
+    ON provider_fleet_hosts (fleet_host);
 CREATE TABLE IF NOT EXISTS daemon_snapshots (
     id BIGSERIAL PRIMARY KEY,
     host TEXT NOT NULL,

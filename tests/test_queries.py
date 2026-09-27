@@ -140,11 +140,12 @@ def test_serving_percentages_lifetime_empty_when_the_aggregate_has_no_since(fake
     assert queries.serving_percentages(pool, "h", 1200.0)["lifetime"] == {}
 
 
-def _status_responses(daemon, demand, card_totals=None, hourly=None):
+def _status_responses(daemon, demand, card_totals=None, hourly=None, aliases=None):
     """Canned rows in the order build_status queries them: daemon, demand,
-    last-served, measured switch cost, earnings x2, bounded serving plus lifetime,
-    earnings rows, card session payout totals, hourly jobs buckets."""
-    return [daemon, demand, [], [{"median": None, "n": 0}],
+    provider_fleet_hosts aliases, last-served, measured switch cost, earnings x2,
+    bounded serving plus lifetime, earnings rows, card session payout totals,
+    hourly jobs buckets."""
+    return [daemon, demand, aliases if aliases is not None else [], [], [{"median": None, "n": 0}],
             [{"total": 2_500_000}], [{"total": 500_000}], [], [],
             [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}],
             card_totals or [{"tokens": 4_000, "requests": 2}],
@@ -388,20 +389,36 @@ def test_manager_demand_computes_ineligible_score_from_snapshot_inputs():
     assert preferred["qwen"]["manager_eligible"] is False and preferred["qwen"]["score"] == .5
 
 
-def test_unconfigured_host_ids_excludes_attestation_uuids(fake_pool):
-    rows = [{"host": f"00000000-0000-4000-8000-{n:012x}", "daemon": False}
-            for n in range(1153)]
-    rows += [{"host": host, "daemon": False}
-             for host in ("m4-128-1", "M1-64-1", "m3-48-1", "m4-128-1-extra")]
-    rows.append({"host": "legacy-mac", "daemon": True})
-    pool = fake_pool(rows)
+def test_build_status_includes_hashes_for_linked_provider_uuid(fake_pool, monkeypatch):
+    _clock(monkeypatch, 10_000.0)
+    uuid_m3 = "00000000-0000-4000-8000-000000000003"
+    attributed = {"session": uuid_m3, "other": "other-uuid"}
+    pool = fake_pool(*_status_responses(
+        [{"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_990.0}],
+        [],
+        aliases=[{"provider_id": uuid_m3}],
+    ))
+    status = queries.build_status(_host_cfg("m3-48-1"), pool, attributed, (None, {}), 0)
+    earnings_calls = [params for sql, params in pool.calls if "sum(micro_usd)" in sql]
+    assert earnings_calls == [
+        (10_000.0 - 86_400, 10_000.0, ["session"]),
+        (10_000.0 - 3_600, 10_000.0, ["session"]),
+    ]
+    assert status["host"]["label"] == "m3-48-1"
 
+
+def test_unconfigured_host_ids_shows_unlinked_provider_uuids(fake_pool):
+    # SQL already excludes provider_ids joined in provider_fleet_hosts; the fake
+    # returns the post-filter host list (unlinked UUID + daemon heartbeat).
+    m4 = "00000000-0000-4000-8000-000000000004"
+    rows = [{"host": m4}, {"host": "legacy-mac"}, {"host": "m3-48-1"}]
+    pool = fake_pool(rows)
     assert queries.unconfigured_host_ids(pool, {"m3-48-1", "M1-64-1"}) == [
-        "legacy-mac", "m4-128-1",
+        m4, "legacy-mac",
     ]
     assert "provider_identities" in pool.calls[0][0]
+    assert "provider_fleet_hosts" in pool.calls[0][0]
     assert "daemon_snapshots" in pool.calls[0][0]
-
 
 def test_unconfigured_host_ids_caps_extras_after_configured_hosts(fake_pool):
     rows = [{"host": f"m5-64-{n}", "daemon": False} for n in range(1, 42)]

@@ -33,25 +33,57 @@ def test_malformed_identity_response_fails(monkeypatch):
         demand.fetch_provider_hashes("https://example.test", "test-key", "key1")
 
 
-def test_identity_ingest_uses_fleet_host_id_not_provider_uuid(monkeypatch, fake_pool):
-    provider_id = "00000000-0000-4000-8000-000000000003"
+def test_account_provider_hosts_map_every_provider_id(monkeypatch):
+    uuid_m3 = "00000000-0000-4000-8000-000000000003"
+    uuid_m4 = "00000000-0000-4000-8000-000000000004"
     replies = iter([
-        {"providers": [{"provider_id": provider_id, "se_public_key": "key3"}]},
-        {"earnings": [{"provider_id": provider_id, "provider_key": "nemotron-session"}]},
+        {"providers": [
+            {"provider_id": uuid_m3, "se_public_key": "key3"},
+            {"provider_id": uuid_m4, "se_public_key": "key4"},
+            {"provider_id": "", "se_public_key": "x"},
+            "junk",
+        ]},
+        {"earnings": [
+            {"provider_id": uuid_m4, "provider_key": "session-m4"},
+            {"provider_id": uuid_m3, "provider_key": "session-m3"},
+            {"provider_id": "other", "provider_key": "skip"},
+        ]},
     ])
     monkeypatch.setattr(demand, "_get_json", lambda *args: next(replies))
+    hosts = demand.fetch_account_provider_hosts("https://example.test", "test-key")
+    assert hosts[hashlib.sha256(b"session-m4").hexdigest()] == uuid_m4
+    assert hosts[hashlib.sha256(b"session-m3").hexdigest()] == uuid_m3
+    assert hosts[hashlib.sha256(uuid_m4.encode()).hexdigest()] == uuid_m4
+    assert "other" not in hosts.values()
+
+
+def test_account_identity_ingest_runs_on_probe_host_only(monkeypatch, fake_pool):
+    mapping = {"aa": "00000000-0000-4000-8000-000000000004",
+               "bb": "00000000-0000-4000-8000-000000000003"}
+    monkeypatch.setattr(demand, "fetch_account_provider_hosts", lambda *a: mapping)
+    probe = SimpleNamespace(probe_self_route=True, api_key="k", base_url="https://example.test")
+    pool = fake_pool()
+    collector._ingest_account_provider_identities(probe, pool)
+    assert pool.calls[0][1] == sorted(mapping.items())
+    assert "DELETE FROM provider_identities" in pool.calls[1][0]
+    assert "DELETE FROM provider_fleet_hosts" in pool.calls[2][0]
+    silent = fake_pool()
+    collector._ingest_account_provider_identities(
+        SimpleNamespace(probe_self_route=False, api_key="k", base_url="https://example.test"), silent)
+    assert silent.calls == []
+
+
+def test_record_provider_fleet_link_uses_se_key(monkeypatch, fake_pool):
+    uuid_m3 = "00000000-0000-4000-8000-000000000003"
+    monkeypatch.setattr(demand, "fetch_provider_ids_for_key", lambda *a: {uuid_m3})
     cfg = SimpleNamespace(host_id="m3-48-1", api_key="k", base_url="https://example.test")
     daemon = SimpleNamespace(fresh=True, attestation_public_key="key3")
     pool = fake_pool()
-    collector._ingest_provider_identity(cfg, pool, daemon)
-    assert pool.calls[0][1] == [
-        (digest, "m3-48-1") for digest in sorted(
-            hashlib.sha256(key.encode()).hexdigest()
-            for key in (provider_id, "nemotron-session")
-        )
-    ]
-    for bad_daemon in (None, SimpleNamespace(fresh=False, attestation_public_key="key3"),
-                       SimpleNamespace(fresh=True, attestation_public_key=None)):
+    collector._record_provider_fleet_link(cfg, pool, daemon)
+    assert pool.calls[0][1] == [(uuid_m3, "m3-48-1")]
+    assert "provider_fleet_hosts" in pool.calls[0][0]
+    for bad in (None, SimpleNamespace(fresh=False, attestation_public_key="key3"),
+                SimpleNamespace(fresh=True, attestation_public_key=None)):
         silent = fake_pool()
-        collector._ingest_provider_identity(cfg, silent, bad_daemon)
+        collector._record_provider_fleet_link(cfg, silent, bad)
         assert silent.calls == []

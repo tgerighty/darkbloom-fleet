@@ -146,6 +146,26 @@ def _hash_to_provider_id(provider_ids: set[str], earnings: list[object]) -> dict
     return hosts
 
 
+def fetch_account_provider_hosts(base_url: str, api_key: str) -> dict[str, str]:
+    """Map every account payout provider_hash to its Darkbloom provider_id.
+
+    provider_id (usually a UUID) is the stable payout-identity key stored in
+    provider_identities.host. Configured Macs join that key to DARKBLOOM_HOST_N_ID
+    via provider_fleet_hosts; unconfigured Macs (e.g. m4) appear as discovered
+    dashboard hosts from the same listing.
+    """
+    providers, earnings = _provider_identity_lists(base_url, api_key)
+    return _hash_to_provider_id(_provider_ids(providers), earnings)
+
+
+def fetch_provider_ids_for_key(base_url: str, api_key: str, public_key: str) -> set[str]:
+    """Darkbloom provider_id values whose SE public key matches this Mac."""
+    if not public_key:
+        return set()
+    providers, _earnings = _provider_identity_lists(base_url, api_key)
+    return _provider_ids(providers, public_key=public_key)
+
+
 def fetch_provider_hashes(base_url: str, api_key: str, public_key: str) -> set[str]:
     """Join this Mac's attestation to account payout identities, never job timing."""
     if not public_key:
