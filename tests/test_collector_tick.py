@@ -91,11 +91,13 @@ def test_run_tick_feeds_one_pass_through_every_stage(monkeypatch):
     monkeypatch.setattr(collector.db, "save_ema", record("save_ema"))
     monkeypatch.setattr(collector.db, "insert_demand_samples", record("samples"))
     monkeypatch.setattr(collector, "_ingest_earnings", record("earnings"))
-    monkeypatch.setattr(collector, "_ingest_provider_identity",
-                        lambda cfg, pool, daemon: calls.append(("identity", daemon)))
+    monkeypatch.setattr(collector, "_ingest_account_provider_identities",
+                        lambda cfg, pool: calls.append("account_identity"))
+    monkeypatch.setattr(collector, "_record_provider_fleet_link",
+                        lambda cfg, pool, daemon: calls.append(("fleet_link", daemon)))
     collector.run_tick(_cfg(live_execution=True), None)
-    assert calls == ["snapshot", "probe", "earnings", ("identity", DAEMON),
-                     "delete_ema", "save_ema", "samples"]
+    assert calls == ["snapshot", "probe", "earnings", "account_identity",
+                     ("fleet_link", DAEMON), "delete_ema", "save_ema", "samples"]
 
 
 def test_run_tick_keys_rows_by_host_id_and_drops_retired_models_from_the_restored_ema(monkeypatch):

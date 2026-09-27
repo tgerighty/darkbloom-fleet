@@ -70,18 +70,60 @@ def _ingest_earnings(cfg: Config, pool: ConnectionPool, now: float) -> None:
     db.insert_payouts(pool, host, payouts, now)
 
 
-def _ingest_provider_identity(cfg: Config, pool: ConnectionPool, daemon: DaemonState | None) -> None:
+def _ingest_account_provider_identities(cfg: Config, pool: ConnectionPool) -> None:
+    """Persist hash→provider_id for every account provider. Probe host only:
+    the attestation listing is account-wide, so one tick discovers new Macs
+    (e.g. m4) without a DARKBLOOM_HOST_N_* slot or SSH to that Mac, and drops
+    provider_ids that left the account listing.
+    """
+    if not (cfg.probe_self_route and cfg.api_key):
+        return
+    try:
+        hosts = demand.fetch_account_provider_hosts(cfg.base_url, cfg.api_key)
+        provider_ids = sorted(set(hosts.values()))
+        with pool.connection() as conn:
+            cur = conn.cursor()
+            if hosts:
+                cur.executemany(
+                    "INSERT INTO provider_identities (provider_hash, host) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                    sorted(hosts.items()),
+                )
+            # Auto-remove only when attestation returned at least one provider_id
+            # (empty success must not wipe history on a blank listing).
+            if provider_ids:
+                cur.execute(
+                    "DELETE FROM provider_identities AS identity "
+                    "WHERE identity.host <> ALL(%s) "
+                    "AND NOT EXISTS (SELECT 1 FROM daemon_snapshots d WHERE d.host = identity.host) "
+                    "AND NOT EXISTS (SELECT 1 FROM provider_fleet_hosts f WHERE f.fleet_host = identity.host)",
+                    (provider_ids,),
+                )
+                cur.execute(
+                    "DELETE FROM provider_fleet_hosts WHERE provider_id <> ALL(%s)",
+                    (provider_ids,),
+                )
+    except Exception:  # identity failure must not stop ingestion or expose authenticated responses
+        log.warning("account provider identity unavailable")
+
+
+def _record_provider_fleet_link(cfg: Config, pool: ConnectionPool, daemon: DaemonState | None) -> None:
+    """Join this Mac's SE key to its Darkbloom provider_id(s) for dashboard labels."""
     if not (cfg.api_key and daemon and daemon.fresh and daemon.attestation_public_key):
         return
     try:
-        hashes = demand.fetch_provider_hashes(cfg.base_url, cfg.api_key, daemon.attestation_public_key)
+        provider_ids = demand.fetch_provider_ids_for_key(
+            cfg.base_url, cfg.api_key, daemon.attestation_public_key,
+        )
+        if not provider_ids:
+            return
         with pool.connection() as conn:
             conn.cursor().executemany(
-                "INSERT INTO provider_identities (provider_hash, host) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                [(digest, cfg.host_id) for digest in sorted(hashes)],
+                "INSERT INTO provider_fleet_hosts (provider_id, fleet_host) VALUES (%s,%s) "
+                "ON CONFLICT (provider_id) DO UPDATE SET fleet_host = EXCLUDED.fleet_host",
+                [(pid, cfg.host_id) for pid in sorted(provider_ids)],
             )
-    except Exception:  # identity failure must not stop ingestion or expose authenticated responses
-        log.warning("provider payout identity unavailable for %s", cfg.host_id)
+    except Exception:  # noqa: BLE001 - link failure must not stop ingestion
+        log.warning("provider fleet link unavailable for %s", cfg.host_id)
 
 
 def _probe_self_route(cfg: Config, pool: ConnectionPool, now: float) -> None:
@@ -121,7 +163,8 @@ def run_tick(cfg: Config, pool: ConnectionPool) -> None:
     daemon, installed = _persist_tick_daemon(cfg, pool, host, now)
     _probe_self_route(cfg, pool, now)
     _ingest_earnings(cfg, pool, now)
-    _ingest_provider_identity(cfg, pool, daemon)
+    _ingest_account_provider_identities(cfg, pool)
+    _record_provider_fleet_link(cfg, pool, daemon)
 
     eligible = _eligible_models(cfg.models, installed)
     db.delete_ineligible_ema(pool, host, eligible)

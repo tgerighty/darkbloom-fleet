@@ -140,13 +140,19 @@ eligibility. Display scores do not change that eligibility.
 
 ## Dashboard host discovery
 
-The dashboard host cards are not limited to `DARKBLOOM_HOST_<N>_*`. Each
-configured host joins its fresh daemon attestation key with account earnings
-and stores payout hashes under its `DARKBLOOM_HOST_<N>_ID`. `/api/status`
-shows configured SSH hosts first. It can add up to 32 Mac-shaped identity
-hosts or hosts seen in `daemon_snapshots` (label = id, spec = `discovered`).
-After this fix is deployed and each host refreshes, run
-`scripts/repair_provider_identity_hosts.sql` once to remove old UUID hosts.
-SSH collection, demand scoring, and warm-manager still
+The dashboard host cards are not limited to `DARKBLOOM_HOST_<N>_*`. On each
+probe-host tick the collector joins `/v1/providers/attestation` with
+account-earnings and stores payout hashes under each Darkbloom `provider_id`
+(UUID) in `provider_identities`. That UUID is the stable payout-identity key.
+Configured SSH hosts also record `provider_id → DARKBLOOM_HOST_<N>_ID` in
+`provider_fleet_hosts` (SE-key join) so Jobs/earnings on the fleet card include
+history keyed by UUID. `/api/status` shows configured SSH hosts first, then up
+to 32 account provider_ids that are not joined to a fleet host (e.g. a new m4)
+plus hosts seen in `daemon_snapshots` (label = id, spec = `discovered`).
+Providers that leave the attestation listing are pruned on the next probe tick.
+After deploy, run `scripts/repair_provider_identity_hosts.sql` once to backfill
+`provider_fleet_hosts` from shared-hash history and drop bare fleet-host_id
+rows from `provider_identities` (UUID keys are kept). Do **not** run the old
+delete-only UUID purge. SSH collection, demand scoring, and warm-manager still
 require a `DARKBLOOM_HOST_<N>_*` slot plus an SSH Host alias in the mounted
 ssh config secret.

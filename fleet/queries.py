@@ -4,7 +4,6 @@ writes so each file stays small and single-purpose.
 from __future__ import annotations
 
 import math
-import re
 import time
 from bisect import bisect_right
 from itertools import pairwise
@@ -364,15 +363,19 @@ def serving_percentages(pool: ConnectionPool, host: str, now: float) -> dict[str
 
 
 def known_host_ids(pool: ConnectionPool) -> list[str]:
-    """Collector hosts and Mac-shaped account provider IDs."""
+    """Daemon heartbeats plus account provider_ids not joined to a fleet host.
+
+    provider_identities.host is the Darkbloom provider_id (UUID). UUIDs linked
+    in provider_fleet_hosts are shown under the configured fleet card instead.
+    """
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT host, false AS daemon FROM provider_identities "
-            "UNION SELECT host, true AS daemon FROM daemon_snapshots"
+            "SELECT host FROM provider_identities "
+            "WHERE host NOT IN (SELECT provider_id FROM provider_fleet_hosts) "
+            "UNION SELECT host FROM daemon_snapshots"
         ).fetchall()
     return sorted({
-        host for row in rows if isinstance(host := row.get("host"), str)
-        and (row["daemon"] or re.fullmatch(r"m[0-9]+-[0-9]+-[0-9]+", host, re.IGNORECASE))
+        host for row in rows if isinstance(host := row.get("host"), str) and host
     })
 
 
@@ -389,13 +392,23 @@ def shared_status_data(
     return attributed, latest_self_route(pool), unattributed_recent(pool, attributed, time.time())
 
 
+def _owner_aliases(pool: ConnectionPool, host: str) -> set[str]:
+    """Fleet host_id plus linked Darkbloom provider_ids (UUID keys)."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT provider_id FROM provider_fleet_hosts WHERE fleet_host = %s", (host,),
+        ).fetchall()
+    return {host, *(str(row["provider_id"]) for row in rows if row.get("provider_id"))}
+
+
 def build_status(cfg: Config, pool: ConnectionPool, attributed: dict[str, str],
                  self_route: tuple[float | None, dict[str, int]], unattributed: int) -> Row:
     host = cfg.host_id
     daemon = latest_daemon(pool, host)
     now = time.time()
     demand = manager_demand(daemon, latest_demand_table(pool, host), now)
-    hashes = [h for h, owner in attributed.items() if owner == host]
+    owners = _owner_aliases(pool, host)
+    hashes = [h for h, owner in attributed.items() if owner in owners]
     routability = routability_panel(pool, host, daemon, cfg.switch_cost_seconds, self_route)
     return {
         "host": {"label": cfg.host_label, "spec": cfg.host_spec},
