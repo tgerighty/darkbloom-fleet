@@ -125,3 +125,10 @@ def test_exact_identity_recovers_dual_host_jobs_and_overrides_wrong_votes(fake_p
     assert attribution.provider_hosts(fake_pool(rows, identities)) == {'m1': 'mac1', 'm3': 'mac2'}
     identities.append({'provider_hash': 'm3', 'host': 'mac1'})
     assert attribution.provider_hosts(fake_pool(rows, identities)) == {'m1': 'mac1'}
+
+
+def test_sole_m3_identity_attributes_nemotron_session(fake_pool):
+    identities = [{"provider_hash": "nemotron-session-hash", "host": "m3-48-1"}]
+    assert attribution.provider_hosts(fake_pool([], identities)) == {
+        "nemotron-session-hash": "m3-48-1",
+    }

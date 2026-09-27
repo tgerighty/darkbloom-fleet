@@ -140,11 +140,13 @@ eligibility. Display scores do not change that eligibility.
 
 ## Dashboard host discovery
 
-The dashboard host cards are not limited to `DARKBLOOM_HOST_<N>_*`. On each
-probe-host tick the collector joins `/v1/providers/attestation` with
-account-earnings and writes every `provider_id` into `provider_identities`.
-`/api/status` then shows configured SSH hosts first. It can add up to 32
-Mac-shaped provider IDs or hosts seen in `daemon_snapshots` (label = id,
-spec = `discovered`). SSH collection, demand scoring, and warm-manager still
+The dashboard host cards are not limited to `DARKBLOOM_HOST_<N>_*`. Each
+configured host joins its fresh daemon attestation key with account earnings
+and stores payout hashes under its `DARKBLOOM_HOST_<N>_ID`. `/api/status`
+shows configured SSH hosts first. It can add up to 32 Mac-shaped identity
+hosts or hosts seen in `daemon_snapshots` (label = id, spec = `discovered`).
+After this fix is deployed and each host refreshes, run
+`scripts/repair_provider_identity_hosts.sql` once to remove old UUID hosts.
+SSH collection, demand scoring, and warm-manager still
 require a `DARKBLOOM_HOST_<N>_*` slot plus an SSH Host alias in the mounted
 ssh config secret.
