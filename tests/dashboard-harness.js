@@ -77,6 +77,7 @@ function hostRoot(before, after) {
     contains: function (el) { return Boolean(el && el._inHosts); },
     toggle: toggle,
     html: function () { return html; },
+    addEventListener: function () {},
     replaceChildren: function (...nodes) { html = nodes.map(function (n) { return n.html; }).join(""); phase = "after"; },
   };
   Object.defineProperty(root, "innerHTML", {
@@ -122,7 +123,9 @@ export async function boot(opts) {
   if (servingEl) byId["serving-window"] = servingEl;
   const doc = {
     getElementById: function (id) { return byId[id] || null; },
+    hidden: false,
     activeElement: opts.active || servingEl,
+    addEventListener: function () {},
     querySelectorAll: function (sel) {
       return sel === ".card" ? hosts.querySelectorAll() : [];
     },
@@ -141,6 +144,8 @@ export async function boot(opts) {
     }
   });
   vi.stubGlobal("setInterval", function (fn, ms) { tick = fn; tick.ms = ms; return 1; });
+  vi.stubGlobal("setTimeout", function () { return 1; });
+  vi.stubGlobal("requestIdleCallback", function () { return 1; });
   vi.stubGlobal("fetch", opts.fetch);
   if (opts.now !== undefined) vi.spyOn(Date, "now").mockReturnValue(opts.now);
   await import("../fleet/static/dashboard.js");

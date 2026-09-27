@@ -1,6 +1,9 @@
 import { esc, fmtAge } from "./ui.js?v=5";
 export { esc } from "./ui.js?v=5";
 
+export const PAYOUT_INITIAL = 15;
+export const payoutExpand = new Set();
+
 const TD = "</td><td>";
 const TR = "<tr><td>";
 const TR_END = "</td></tr>";
@@ -201,15 +204,28 @@ function trustSection(r) {
     "</tbody></table></details>";
 }
 
-function payoutsSection(rows, unattributed) {
-  const body = rows.length ? rows.map(function (e) {
+function payoutsSection(rows, unattributed, hostLabel) {
+  const all = rows || [];
+  const expanded = payoutExpand.has(hostLabel);
+  const shown = expanded || all.length <= PAYOUT_INITIAL ? all : all.slice(0, PAYOUT_INITIAL);
+  const body = shown.length ? shown.map(function (e) {
     return TR + fmtAge(e.created_at) + TD + esc(e.model) + TD + e.completion_tokens + TD +
       "$" + num(e.micro_usd / 1e6, 4) + TR_END;
   }).join("") : "<tr><td colspan=4><i>no payouts recorded yet</i></td></tr>";
+  let pager = "";
+  if (all.length > PAYOUT_INITIAL) {
+    if (expanded) {
+      pager = '<button type="button" class="more-btn" data-action="payouts-collapse" data-host="' +
+        esc(hostLabel) + '">Show fewer</button>';
+    } else {
+      pager = '<button type="button" class="more-btn" data-action="payouts-expand" data-host="' +
+        esc(hostLabel) + '">Show all ' + all.length + "</button>";
+    }
+  }
   return '<details class="fold" data-fold="payouts"><summary>Recent payouts · ' + unattributed +
     ' unattributed of last 50</summary><div class="scroll tall" data-scroll="payouts"><table>' +
     "<thead><tr><th>when</th><th>model</th><th>completion tokens</th><th>paid</th></tr></thead>" +
-    "<tbody>" + body + "</tbody></table></div></details>";
+    "<tbody>" + body + "</tbody></table></div>" + pager + "</details>";
 }
 
 function latestJobsSection(earnings) {
@@ -265,10 +281,11 @@ function hostCard(s) {
 }
 
 function hostFolds(s, card, servingWindow, hourlyHtml) {
+  const label = (s.host && s.host.label) || "";
   return managerSection(card.manager) +
     servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
     latestJobsSection(s.recent_earnings) + slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
-    payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0);
+    payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0, label);
 }
 
 export function renderHost(s, servingWindow, hourlyHtml) {
