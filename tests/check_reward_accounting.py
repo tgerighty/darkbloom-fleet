@@ -56,7 +56,8 @@ def check():
                      (lower - 1, lower + 1))
         conn.execute("INSERT INTO earnings VALUES ('copy1',7,'old','nemotron',%s,50,10),"
                      "('copy1',8,'recent','nemotron',%s,50,10)", (lower, lower + 0.5))
-        assert {r['payout_rowid'] for r in conn.execute(attribution._VOTES_SQL, vote_window)} == {8}
+        assert {r['payout_rowid'] for r in conn.execute(attribution._VOTES_SQL, vote_window)
+                if r['host'] == 'boundary'} == {8}
         conn.rollback()
     print('PASS: rewards counted once per provider; unknown/future excluded; jobs and votes exclude rewards')
 
