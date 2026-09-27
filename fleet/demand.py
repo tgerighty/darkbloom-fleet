@@ -146,17 +146,6 @@ def _hash_to_provider_id(provider_ids: set[str], earnings: list[object]) -> dict
     return hosts
 
 
-def fetch_account_provider_hosts(base_url: str, api_key: str) -> dict[str, str]:
-    """Map every account payout provider_hash to its Darkbloom provider_id.
-
-    provider_id is the stable host identity on the dashboard (same string as
-    DARKBLOOM_HOST_<N>_ID when that Mac is also SSH-collected). No per-Mac
-    attestation key is required: the account listing discovers every provider.
-    """
-    providers, earnings = _provider_identity_lists(base_url, api_key)
-    return _hash_to_provider_id(_provider_ids(providers), earnings)
-
-
 def fetch_provider_hashes(base_url: str, api_key: str, public_key: str) -> set[str]:
     """Join this Mac's attestation to account payout identities, never job timing."""
     if not public_key:
