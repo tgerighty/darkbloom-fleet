@@ -78,10 +78,20 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
             log.exception("shared status data failed")
             return {"hosts": [_error_host(cfg) for cfg in configs]}
         display = _display_configs(configs, extras)
-        statuses = [
-            await asyncio.to_thread(_status_row, cfg, pool, attributed, self_route, unattributed)
-            for cfg in display
-        ]
+        # Bound host-row fan-out to the pool: each build_status holds one
+        # connection at a time; stampeding past max_size just queues in the
+        # pool and adds no throughput. Order matches `display`.
+        # ponytail: Semaphore(pool.max_size); raise if status holds >1 conn.
+        limit = max(1, int(getattr(pool, "max_size", 4) or 4))
+        gate = asyncio.Semaphore(limit)
+
+        async def _bounded(cfg: object) -> queries.Row:
+            async with gate:
+                return await asyncio.to_thread(
+                    _status_row, cfg, pool, attributed, self_route, unattributed,
+                )
+
+        statuses = await asyncio.gather(*(_bounded(cfg) for cfg in display))
         hourly.share_legends(statuses)
         return {"hosts": list(statuses)}
 

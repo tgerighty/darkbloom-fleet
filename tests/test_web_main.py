@@ -207,12 +207,13 @@ def test_status_appends_discovered_hosts_after_configured(monkeypatch):
         pool=None,
     )
     body = asyncio.run(_route(app, "/api/status").endpoint())
+    # gather preserves display order even when build threads finish out of order
     assert [row["host"]["label"] for row in body["hosts"]] == ["m3-48-1", "m4-128-1"]
     assert body["hosts"][1]["host"]["spec"] == "discovered"
-    assert seen == ["m3-48-1", "m4-128-1"]
+    assert set(seen) == {"m3-48-1", "m4-128-1"}
 
 
-def test_status_builds_host_rows_one_at_a_time(monkeypatch):
+def test_status_bounds_host_row_concurrency_to_pool_max_size(monkeypatch):
     active = 0
     peak = 0
     lock = threading.Lock()
@@ -222,13 +223,41 @@ def test_status_builds_host_rows_one_at_a_time(monkeypatch):
         with lock:
             active += 1
             peak = max(peak, active)
-        time.sleep(0.01)
+        time.sleep(0.05)
         with lock:
             active -= 1
         return {"label": cfg.host_label}
 
     _patch_status(monkeypatch, build)
-    configs = tuple(SimpleNamespace(host_label=f"m{n}") for n in range(5))
+    configs = tuple(SimpleNamespace(host_label=f"m{n}") for n in range(8))
+    pool = SimpleNamespace(max_size=3)
+    app = web.create_app(configs, pool=pool)
+    t0 = time.perf_counter()
+    body = asyncio.run(_route(app, "/api/status").endpoint())
+    elapsed = time.perf_counter() - t0
+    assert [row["label"] for row in body["hosts"]] == [f"m{n}" for n in range(8)]
+    assert peak == 3
+    # sequential ~8*0.05=0.40s; three-wide ~ceil(8/3)*0.05 ~= 0.15s (+slack)
+    assert elapsed < 0.30, elapsed
+
+
+def test_status_falls_back_to_four_when_pool_has_no_max_size(monkeypatch):
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def build(cfg, *_args):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return {"label": cfg.host_label}
+
+    _patch_status(monkeypatch, build)
+    configs = tuple(SimpleNamespace(host_label=f"m{n}") for n in range(6))
     app = web.create_app(configs, pool=None)
-    assert len(asyncio.run(_route(app, "/api/status").endpoint())["hosts"]) == 5
-    assert peak == 1
+    assert len(asyncio.run(_route(app, "/api/status").endpoint())["hosts"]) == 6
+    assert peak == 4
