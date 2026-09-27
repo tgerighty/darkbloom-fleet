@@ -41,14 +41,14 @@ def test_static_modules_must_be_revalidated_on_every_load():
 
 
 def _patch_status(monkeypatch, build, shared=None, extras=None):
-    monkeypatch.setattr(web.queries, "shared_status_data", shared or (lambda pool: ({}, (None, {}))))
+    monkeypatch.setattr(web.queries, "shared_status_data", shared or (lambda pool: ({}, (None, {}), 0)))
     monkeypatch.setattr(web.queries, "unconfigured_host_ids",
                         (lambda pool, configured: list(extras or [])))
     monkeypatch.setattr(web.queries, "build_status", build)
 
 
 def test_status_returns_one_entry_per_host(monkeypatch):
-    _patch_status(monkeypatch, lambda cfg, pool, attributed, self_route: {"label": cfg.host_label})
+    _patch_status(monkeypatch, lambda cfg, pool, attributed, self_route, unattributed: {"label": cfg.host_label})
     app = web.create_app((SimpleNamespace(host_label="m3"), SimpleNamespace(host_label="m1")), pool=None)
     assert asyncio.run(_route(app, "/api/status").endpoint()) == {"hosts": [{"label": "m3"}, {"label": "m1"}]}
 
@@ -56,15 +56,16 @@ def test_status_returns_one_entry_per_host(monkeypatch):
 def test_status_computes_account_wide_data_once_and_passes_it_to_each_host(monkeypatch):
     attributed = {"s1": "m3"}
     self_route = (100.0, {"a": 1})
+    unattributed = 2
     shared_calls = []
     seen = []
 
     def shared(pool):
         shared_calls.append(pool)
-        return attributed, self_route
+        return attributed, self_route, unattributed
 
-    def build(cfg, pool, got_attr, got_route):
-        seen.append((cfg.host_label, got_attr, got_route))
+    def build(cfg, pool, got_attr, got_route, got_unattributed):
+        seen.append((cfg.host_label, got_attr, got_route, got_unattributed))
         return {"label": cfg.host_label}
 
     _patch_status(monkeypatch, build, shared)
@@ -73,11 +74,12 @@ def test_status_computes_account_wide_data_once_and_passes_it_to_each_host(monke
     assert shared_calls == ["P"]
     assert {row[0] for row in seen} == {"m3", "m1"}
     assert all(row[1] is attributed and row[2] is self_route for row in seen)
+    assert all(row[3] == unattributed for row in seen)
     assert len(seen) == 2
 
 
 def test_status_keeps_a_host_when_the_other_build_fails(monkeypatch, caplog):
-    def build(cfg, pool, attributed, self_route):
+    def build(cfg, pool, attributed, self_route, unattributed):
         if cfg.host_label == "m1":
             raise RuntimeError("boom")
         return {"host": {"label": cfg.host_label}, "mode": "OBSERVE"}
@@ -102,7 +104,7 @@ def test_status_keeps_host_rows_when_shared_data_fails(monkeypatch, caplog):
     def shared(pool):
         raise RuntimeError("votes down")
 
-    _patch_status(monkeypatch, lambda cfg, pool, attributed, self_route: {"label": cfg.host_label}, shared)
+    _patch_status(monkeypatch, lambda cfg, pool, attributed, self_route, unattributed: {"label": cfg.host_label}, shared)
     app = web.create_app(
         (SimpleNamespace(host_label="m3", host_spec="M3", live_execution=False),
          SimpleNamespace(host_label="m1", host_spec="M1", live_execution=False)),
@@ -194,7 +196,7 @@ def test_status_shares_hourly_letters_and_colour_order_across_hosts(monkeypatch)
 def test_status_appends_discovered_hosts_after_configured(monkeypatch):
     seen = []
 
-    def build(cfg, pool, attributed, self_route):
+    def build(cfg, pool, attributed, self_route, unattributed):
         seen.append(cfg.host_id)
         return {"host": {"label": cfg.host_label, "spec": cfg.host_spec}}
 

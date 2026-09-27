@@ -80,6 +80,15 @@ def test_window_shares_drop_future_snapshots():
     assert _window_shares(snaps, None, 1500.0) == {"a": 100.0, "idle": 0.0}
 
 
+def test_window_shares_only_reduces_rows_inside_the_window(monkeypatch):
+    snaps = [_snap(float(t), "a") for t in range(1001)] + [_snap(1001.0, "future")]
+    reduced = []
+    monkeypatch.setattr(queries, "_serving_shares",
+                        lambda rows, since, now: reduced.extend(rows) or {})
+    _window_shares(snaps, 10.0, 1000.0)
+    assert [row["observed_at"] for row in reduced] == list(map(float, range(990, 1001)))
+
+
 def test_window_shares_treat_unfresh_snapshots_as_idle():
     snaps = [_snap(0.0, "a", fresh=False), _snap(60.0, "a", fresh=False), _snap(120.0, "a", fresh=False)]
     assert _window_shares(snaps, 180.0, 180.0) == {"idle": 100.0}
@@ -134,12 +143,10 @@ def test_serving_percentages_lifetime_empty_when_the_aggregate_has_no_since(fake
 def _status_responses(daemon, demand, card_totals=None, hourly=None):
     """Canned rows in the order build_status queries them: daemon, demand,
     last-served, measured switch cost, earnings x2, bounded serving plus lifetime,
-    earnings rows, unattributed recent hashes, the card's session
-    payout totals, the hourly jobs buckets."""
+    earnings rows, card session payout totals, hourly jobs buckets."""
     return [daemon, demand, [], [{"median": None, "n": 0}],
             [{"total": 2_500_000}], [{"total": 500_000}], [], [],
             [{"created_at": 9_000.0, "model": "a", "completion_tokens": 30, "micro_usd": 12}],
-            [{"provider_hash": None}, {"provider_hash": "no-votes"}],
             card_totals or [{"tokens": 4_000, "requests": 2}],
             hourly or []]
 
@@ -154,7 +161,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
                                         hourly=hourly))
     status = queries.build_status(
         SimpleNamespace(host_label="M3 label", host_id="m3", host_spec="M3 Max", live_execution=False,
-                        switch_cost_seconds=300.0, daemon_freshness_seconds=90.0), pool, attributed, self_route)
+                        switch_cost_seconds=300.0, daemon_freshness_seconds=90.0), pool, attributed, self_route, 2)
     assert status["host"] == {"label": "M3 label", "spec": "M3 Max"} and status["mode"] == "MONITOR"
     assert status["current_model"] == "a" and status["daemon_fresh"] is True
     assert status["earnings_usd_24h"] == 2.5 and status["earnings_usd_1h"] == 0.5
@@ -219,7 +226,7 @@ def test_recent_and_unattributed_share_unique_ledger_rows(fake_pool):
     assert "DISTINCT ON (payout_rowid)" in recent_sql and "DISTINCT ON (payout_rowid)" in unattr_sql
     assert "host = %s" not in recent_sql and "host = %s" not in unattr_sql
     assert recent_params == (10.0, ["s1"], 50)
-    assert unattr_params == (10.0, 50)
+    assert unattr_params == (10.0, 50, 50)
 
 
 def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
@@ -227,7 +234,7 @@ def test_build_status_without_any_daemon_snapshot(fake_pool, monkeypatch):
     pool = fake_pool(*_status_responses([], []))
     status = queries.build_status(SimpleNamespace(host_label="m1", host_id="m1", host_spec="?", live_execution=True,
                                                   switch_cost_seconds=300.0, daemon_freshness_seconds=90.0),
-                                  pool, {}, (None, {}))
+                                  pool, {}, (None, {}), 0)
     assert status["current_model"] is None and status["mode"] == "MONITOR"
     assert status["serving"]["1h"] == {"idle": 100.0} and status["demand"] == []
     assert status["card"]["status"]["state"] == "OFF" and status["card"]["kpis"]["tokens"] == 4_000
@@ -237,21 +244,23 @@ def test_build_status_expires_stored_fresh_flag(fake_pool, monkeypatch):
     _clock(monkeypatch, 10_000.0)
     daemon = {"current_model": "a", "fresh": True, "inference_active": False, "observed_at": 9_800.0}
     pool = fake_pool(*_status_responses([daemon], []))
-    status = queries.build_status(_host_cfg("m1"), pool, {}, (None, {}))
+    status = queries.build_status(_host_cfg("m1"), pool, {}, (None, {}), 0)
     assert status["daemon_fresh"] is False
 
 
-def test_shared_status_data_is_attribution_plus_self_route(fake_pool):
+def test_shared_status_data_includes_one_account_wide_unattributed_count(fake_pool):
     pool = fake_pool(
         [{"payout_rowid": 1, "provider_hash": "s1", "host": "m3"}],
         [],
         [{"t": 100.0}],
         [{"model": "a", "routable_providers": 1}],
+        [{"provider_hash": "s1"}, {"provider_hash": None}],
     )
-    attributed, self_route = queries.shared_status_data(pool)
+    attributed, self_route, unattributed = queries.shared_status_data(pool)
     assert attributed == {"s1": "m3"}
     assert self_route == (100.0, {"a": 1})
-    assert len(pool.calls) == 4
+    assert unattributed == 1
+    assert len(pool.calls) == 5
 
 
 def _host_cfg(hid):
@@ -268,18 +277,21 @@ def test_two_hosts_run_account_wide_sql_once(fake_pool, monkeypatch):
         [],
         [{"t": 1.0}],
         [{"model": "a", "routable_providers": 1}],
+        [{"provider_hash": None}, {"provider_hash": "no-votes"}],
         *host_block,
         *host_block,
     )
-    attributed, self_route = queries.shared_status_data(pool)
-    queries.build_status(_host_cfg("m3"), pool, attributed, self_route)
-    queries.build_status(_host_cfg("m1"), pool, attributed, self_route)
+    attributed, self_route, unattributed = queries.shared_status_data(pool)
+    queries.build_status(_host_cfg("m3"), pool, attributed, self_route, unattributed)
+    queries.build_status(_host_cfg("m1"), pool, attributed, self_route, unattributed)
     vote_sql = [sql for sql, _ in pool.calls if sql == attribution._VOTES_SQL]
     route_sql = [sql for sql, _ in pool.calls if "self_route_samples" in sql]
+    unattributed_sql = [sql for sql, _ in pool.calls if sql == attribution._UNATTRIBUTED_SQL]
     bounded_sql = [sql for sql, _ in pool.calls if "left_boundary" in sql]
     lifetime_sql = [sql for sql, _ in pool.calls if "LEAD(" in sql]
     assert len(vote_sql) == 1
     assert len(route_sql) == 2
+    assert len(unattributed_sql) == 1
     assert len(bounded_sql) == 2 and len(lifetime_sql) == 2
 
 

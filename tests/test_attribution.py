@@ -67,9 +67,56 @@ def test_unattributed_recent_uses_the_account_wide_unique_ledger(fake_pool):
     assert attribution.unattributed_recent(pool, {"s_other": "mac2", "s1": "mac1"}, now=9.0) == 1
     sql, params = pool.calls[0]
     assert "DISTINCT ON (payout_rowid)" in sql
+    assert "CROSS JOIN LATERAL" in sql and "host = h.host" in sql
     assert "host = %s" not in sql
     assert "created_at <= %s" in sql
-    assert params == (9.0, 50)
+    assert params == (9.0, 50, 50)
+
+
+def test_unattributed_recent_preserves_latest_unique_copy_semantics(fake_pool):
+    now, limit = 10.0, 3
+    copies = [
+        {"payout_rowid": 1, "created_at": 9.0, "host": "m1", "provider_hash": None},
+        {"payout_rowid": 1, "created_at": 9.0, "host": "m2", "provider_hash": "unknown"},
+        {"payout_rowid": 2, "created_at": 8.0, "host": "m1", "provider_hash": "s1"},
+        {"payout_rowid": 2, "created_at": 8.0, "host": "m2", "provider_hash": "s1"},
+        {"payout_rowid": 3, "created_at": 7.0, "host": "m1", "provider_hash": ""},
+        {"payout_rowid": 3, "created_at": 7.0, "host": "m2", "provider_hash": None},
+        {"payout_rowid": 4, "created_at": 6.0, "host": "m1", "provider_hash": "older"},
+        {"payout_rowid": 4, "created_at": 6.0, "host": "m2", "provider_hash": "older"},
+    ]
+
+    def old_semantics(rows):
+        unique = {}
+        for row in rows:
+            if row["created_at"] > now:
+                continue
+            prior = unique.get(row["payout_rowid"])
+            rank = (row["provider_hash"] in (None, ""), row["host"])
+            if prior is None or rank < (prior["provider_hash"] in (None, ""), prior["host"]):
+                unique[row["payout_rowid"]] = row
+        return sorted(unique.values(), key=lambda row: row["created_at"], reverse=True)[:limit]
+
+    previous = old_semantics(copies)
+    candidates = [
+        row
+        for host in {row["host"] for row in copies}
+        for row in sorted(
+            (copy for copy in copies if copy["host"] == host and copy["created_at"] <= now),
+            key=lambda copy: copy["created_at"], reverse=True,
+        )[:limit]
+    ]
+    optimized = old_semantics(candidates)
+    assert [(row["payout_rowid"], row["provider_hash"]) for row in optimized] == [
+        (row["payout_rowid"], row["provider_hash"]) for row in previous
+    ]
+
+    pool = fake_pool([{"provider_hash": row["provider_hash"]} for row in optimized])
+    assert attribution.unattributed_recent(pool, {"s1": "m1"}, now, limit) == 2
+    sql, params = pool.calls[0]
+    assert "ORDER BY payout_rowid, (provider_hash IS NULL OR provider_hash = ''), host" in sql
+    assert "ORDER BY created_at DESC" in sql
+    assert params == (now, limit, limit)
 
 
 def test_exact_identity_recovers_dual_host_jobs_and_overrides_wrong_votes(fake_pool):

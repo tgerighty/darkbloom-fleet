@@ -101,11 +101,28 @@ def provider_hosts(pool: ConnectionPool) -> dict[str, str]:
     return attributed
 
 
-_UNATTRIBUTED_SQL = (
-    "SELECT provider_hash FROM ("
-    + unique_payouts_sql("provider_hash, created_at", "created_at <= %s")
-    + ") unique_payouts ORDER BY created_at DESC LIMIT %s"
+_UNATTRIBUTED_SQL = """
+WITH hosts AS (
+    SELECT DISTINCT host FROM earnings
+), recent_copies AS (
+    -- Payout copies share created_at, so the host/time index bounds candidates
+    -- before the account-wide unique-payout selection.
+    SELECT recent.payout_rowid, recent.provider_hash, recent.created_at, recent.host
+    FROM hosts h
+    CROSS JOIN LATERAL (
+        SELECT payout_rowid, provider_hash, created_at, host
+        FROM earnings
+        WHERE host = h.host AND created_at <= %s
+        ORDER BY created_at DESC
+        LIMIT %s
+    ) recent
+), unique_payouts AS (
+    SELECT DISTINCT ON (payout_rowid) payout_rowid, provider_hash, created_at
+    FROM recent_copies
+    ORDER BY payout_rowid, (provider_hash IS NULL OR provider_hash = ''), host
 )
+SELECT provider_hash FROM unique_payouts ORDER BY created_at DESC LIMIT %s
+"""
 
 
 def unattributed_recent(pool: ConnectionPool, attributed: dict[str, str],
@@ -116,5 +133,5 @@ def unattributed_recent(pool: ConnectionPool, attributed: dict[str, str],
     Shown on the dashboard so incomplete attribution is visible rather than
     silently looking like zero earnings."""
     with pool.connection() as conn:
-        rows = conn.execute(_UNATTRIBUTED_SQL, (now, limit)).fetchall()
+        rows = conn.execute(_UNATTRIBUTED_SQL, (now, limit, limit)).fetchall()
     return sum(1 for row in rows if row["provider_hash"] not in attributed)
