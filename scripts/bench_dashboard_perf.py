@@ -103,7 +103,8 @@ def _fixtures(now: float, host_count: int, history: list[dict[str, object]],
         })
     self_route_rows = latest_route
     known_hosts = [{"host": host, "daemon": True} for host in host_ids]
-    shared = (votes, identities, [{"t": now - 5}], self_route_rows, known_hosts)
+    unattributed_rows = [{"provider_hash": None}, {"provider_hash": "unknown"}]
+    shared = (votes, identities, [{"t": now - 5}], self_route_rows, unattributed_rows, known_hosts)
 
     per_host: list[object] = []
     demand_rows = _demand_rows(now, 16)
@@ -112,7 +113,6 @@ def _fixtures(now: float, host_count: int, history: list[dict[str, object]],
     recent_rows = [{"created_at": now - i, "model": HISTORY_MODELS[i % 4],
                     "completion_tokens": 200 + i, "micro_usd": 100 + i}
                    for i in range(50)]
-    unattributed_rows = [{"provider_hash": None}, {"provider_hash": "unknown"}]
     served_rows = [{"model": model, "t": now - i * 60} for i, model in enumerate(HISTORY_MODELS)]
     health_rows = [{"observed_at": now - (59 - i) * 60, "warm_models": list(HISTORY_MODELS),
                     "inference_active": False, "requests_served": 100} for i in range(60)]
@@ -121,7 +121,7 @@ def _fixtures(now: float, host_count: int, history: list[dict[str, object]],
             [daemon], demand_rows, served_rows, [{"median": 42.0, "n": 5}],
             [{"t": now - 300}], [{"t": now - 120}],
             [{"total": 2_500_000}], [{"total": 500_000}], history, lifetime_rows,
-            recent_rows, unattributed_rows, [{"tokens": 4_000, "requests": 50}],
+            recent_rows, [{"tokens": 4_000, "requests": 50}],
             hourly_rows, health_rows,
         ])
     return (*shared, *per_host), host_ids
@@ -154,7 +154,7 @@ async def _status_samples(host_count: int, now: float, history: list[dict[str, o
     app = web.create_app(configs, pool)
     route = next(route for route in app.router.routes if getattr(route, "path", None) == "/api/status")
     samples: list[float] = []
-    expected_calls = 5 + 15 * host_count
+    expected_calls = 6 + 14 * host_count
     for index in range(warmups + iterations):
         pool.responses[:] = responses
         pool.calls.clear()
