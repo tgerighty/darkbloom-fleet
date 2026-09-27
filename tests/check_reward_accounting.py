@@ -50,6 +50,13 @@ def check():
         # Simultaneous work must not create a unique-host vote.
         conn.execute("INSERT INTO daemon_snapshots VALUES ('mac2',0,0,1),('mac2',200,1,1)")
         assert attribution._attributed_from_votes(conn.execute(attribution._VOTES_SQL, vote_window).fetchall()) == {}
+        # Both payouts can vote from these snapshots; the lower boundary must not.
+        lower = vote_window[0]
+        conn.execute("INSERT INTO daemon_snapshots VALUES ('boundary',%s,0,1),('boundary',%s,1,1)",
+                     (lower - 1, lower + 1))
+        conn.execute("INSERT INTO earnings VALUES ('copy1',7,'old','nemotron',%s,50,10),"
+                     "('copy1',8,'recent','nemotron',%s,50,10)", (lower, lower + 0.5))
+        assert {r['payout_rowid'] for r in conn.execute(attribution._VOTES_SQL, vote_window)} == {8}
         conn.rollback()
     print('PASS: rewards counted once per provider; unknown/future excluded; jobs and votes exclude rewards')
 
