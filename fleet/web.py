@@ -10,6 +10,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, Response
@@ -65,10 +66,10 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     # response_model=None: the rows are plain dicts; FastAPI must not build a
     # validation model from the annotation.
     @app.get("/api/status", response_model=None)
-    async def status() -> dict[str, list[queries.Row]]:
+    async def status() -> dict[str, object]:
         # Attribution and the self-route view are account-wide: query once,
         # then every host row reads the same mapping. Host cards are the
-        # configured SSH collectors plus discovered Macs and heartbeat hosts.
+        # configured SSH collectors plus named discovered Macs (not UUIDs).
         try:
             attributed, self_route, unattributed = await asyncio.to_thread(queries.shared_status_data, pool)
             extras = await asyncio.to_thread(
@@ -77,7 +78,13 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
         except Exception:
             log.exception("shared status data failed")
             return {"hosts": [_error_host(cfg) for cfg in configs]}
-        display = _display_configs(configs, extras)
+        # UUID discovery rows are account provider_ids, not fleet Macs. Full
+        # build_status on each burned ~1.4s×32 after #34 still left ~45s wall.
+        # Fan-out only configured + named discoveries; expose UUID count cheaply.
+        uuid_extras, named_extras = [], []
+        for host_id in extras:
+            (uuid_extras if _is_provider_uuid(host_id) else named_extras).append(host_id)
+        display = _display_configs(configs, named_extras)
         # Bound host-row fan-out to the pool: each build_status holds one
         # connection at a time; stampeding past max_size just queues in the
         # pool and adds no throughput. Order matches `display`.
@@ -93,10 +100,22 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
 
         statuses = await asyncio.gather(*(_bounded(cfg) for cfg in display))
         hourly.share_legends(statuses)
-        return {"hosts": list(statuses)}
+        body: dict[str, object] = {"hosts": list(statuses)}
+        if uuid_extras:
+            body["discovered_unlinked"] = len(uuid_extras)
+        return body
 
     return app
 
+
+
+def _is_provider_uuid(host_id: str) -> bool:
+    """True for Darkbloom provider_id keys (RFC-4122 UUID strings)."""
+    try:
+        UUID(host_id)
+    except ValueError:
+        return False
+    return True
 
 
 def _configured_host_ids(configs: tuple[Config, ...]) -> set[str]:
@@ -109,10 +128,11 @@ def _configured_host_ids(configs: tuple[Config, ...]) -> set[str]:
 
 
 def _display_configs(configs: tuple[Config, ...], extra_ids: list[str]) -> list[object]:
-    """Configured hosts first (deploy order), then discovered hosts.
+    """Configured hosts first (deploy order), then named discovered hosts.
 
-    Discovered rows are display-only: build_status only reads host_id/label/spec
-    and the freshness/switch-cost knobs copied from the first configured host.
+    Callers must filter UUID provider_ids out of extra_ids — those are not Macs.
+    Named discovered rows are display-only: build_status only reads
+    host_id/label/spec and freshness/switch-cost knobs from configs[0].
     """
     from types import SimpleNamespace
 

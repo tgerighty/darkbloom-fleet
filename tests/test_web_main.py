@@ -261,3 +261,55 @@ def test_status_falls_back_to_four_when_pool_has_no_max_size(monkeypatch):
     app = web.create_app(configs, pool=None)
     assert len(asyncio.run(_route(app, "/api/status").endpoint())["hosts"]) == 6
     assert peak == 4
+
+
+def test_status_skips_uuid_discovery_full_rows_and_exposes_count(monkeypatch):
+    """UUID provider_ids must not multiply per-host build_status / DB work."""
+    seen = []
+    builds = {"n": 0}
+
+    def build(cfg, pool, attributed, self_route, unattributed):
+        builds["n"] += 1
+        seen.append(cfg.host_id)
+        return {"host": {"label": cfg.host_label, "spec": cfg.host_spec}}
+
+    uuids = [f"00000000-0000-4000-8000-{n:012d}" for n in range(1, 33)]
+    _patch_status(monkeypatch, build, extras=[*uuids, "m4-128-1"])
+    app = web.create_app(
+        (SimpleNamespace(host_id="m3-48-1", host_label="m3-48-1", host_spec="M3",
+                         daemon_freshness_seconds=90, switch_cost_seconds=300),
+         SimpleNamespace(host_id="M1-64-1", host_label="M1-64-1", host_spec="M1",
+                         daemon_freshness_seconds=90, switch_cost_seconds=300)),
+        pool=None,
+    )
+    body = asyncio.run(_route(app, "/api/status").endpoint())
+    labels = [row["host"]["label"] for row in body["hosts"]]
+    assert labels == ["m3-48-1", "M1-64-1", "m4-128-1"]
+    assert body["hosts"][2]["host"]["spec"] == "discovered"
+    assert set(seen) == {"m3-48-1", "M1-64-1", "m4-128-1"}
+    assert builds["n"] == 3  # not 2 + 32 + 1
+    assert body["discovered_unlinked"] == 32
+    assert not any(web._is_provider_uuid(label) for label in labels)
+
+
+def test_status_omits_discovered_unlinked_when_no_uuid_extras(monkeypatch):
+    _patch_status(
+        monkeypatch,
+        lambda cfg, *_a: {"host": {"label": cfg.host_label}},
+        extras=["m4-128-1"],
+    )
+    app = web.create_app(
+        (SimpleNamespace(host_id="m3-48-1", host_label="m3-48-1", host_spec="M3",
+                         daemon_freshness_seconds=90, switch_cost_seconds=300),),
+        pool=None,
+    )
+    body = asyncio.run(_route(app, "/api/status").endpoint())
+    assert "discovered_unlinked" not in body
+    assert [row["host"]["label"] for row in body["hosts"]] == ["m3-48-1", "m4-128-1"]
+
+
+def test_is_provider_uuid_accepts_rfc4122_only():
+    assert web._is_provider_uuid("00000000-0000-4000-8000-000000000004")
+    assert not web._is_provider_uuid("m4-128-1")
+    assert not web._is_provider_uuid("legacy-mac")
+    assert not web._is_provider_uuid("")
