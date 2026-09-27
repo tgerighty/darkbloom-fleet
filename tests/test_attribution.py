@@ -1,5 +1,7 @@
 from fleet import attribution
 
+NOW = 100_000.0
+
 
 def _vote_rows(*rows):
     return [{"payout_rowid": pid, "provider_hash": h, "host": host} for pid, h, host in rows]
@@ -11,7 +13,7 @@ def test_the_hash_goes_to_the_host_with_the_most_votes(fake_pool):
         (4, "s1", "mac2"),
         (5, "s2", "mac2"), (6, "s2", "mac2"),
     ))
-    assert attribution.provider_hosts(pool) == {"s1": "mac1", "s2": "mac2"}
+    assert attribution.provider_hosts(pool, NOW) == {"s1": "mac1", "s2": "mac2"}
 
 
 def test_a_tie_or_no_votes_leaves_the_hash_unattributed(fake_pool):
@@ -20,8 +22,8 @@ def test_a_tie_or_no_votes_leaves_the_hash_unattributed(fake_pool):
         (3, "tie", "mac2"), (4, "tie", "mac2"),
         (5, "solo", "mac1"),
     ))
-    assert attribution.provider_hosts(pool) == {"solo": "mac1"}
-    assert attribution.provider_hosts(fake_pool([])) == {}
+    assert attribution.provider_hosts(pool, NOW) == {"solo": "mac1"}
+    assert attribution.provider_hosts(fake_pool([]), NOW) == {}
 
 
 def test_vote_sql_emits_one_row_per_payout_and_rising_host():
@@ -30,11 +32,19 @@ def test_vote_sql_emits_one_row_per_payout_and_rising_host():
     assert "GROUP BY" not in sql
     assert "nxt.requests_served > prev.requests_served" in sql
     assert "provider_hash <> ''" in sql
+    assert "created_at > %s AND created_at <= %s" in sql
+
+
+def test_votes_use_only_the_dashboard_day_and_identities_stay_unbounded(fake_pool):
+    pool = fake_pool([], [{"provider_hash": "old-identity", "host": "mac1"}])
+    assert attribution.provider_hosts(pool, NOW) == {"old-identity": "mac1"}
+    assert pool.calls[0] == (attribution._VOTES_SQL, (NOW - 86_400, NOW))
+    assert pool.calls[1] == ("SELECT provider_hash, host FROM provider_identities", None)
 
 
 def test_a_dual_host_rise_leaves_the_hash_unattributed(fake_pool):
     pool = fake_pool(_vote_rows((1, "s1", "mac1"), (1, "s1", "mac2")))
-    assert attribution.provider_hosts(pool) == {}
+    assert attribution.provider_hosts(pool, NOW) == {}
 
 
 def test_unique_rises_still_assign_a_hash_after_dropping_dual_host_payouts(fake_pool):
@@ -43,7 +53,7 @@ def test_unique_rises_still_assign_a_hash_after_dropping_dual_host_payouts(fake_
         (2, "s1", "mac1"), (2, "s1", "mac2"),
         (3, "s1", "mac1"),
     ))
-    assert attribution.provider_hosts(pool) == {"s1": "mac1"}
+    assert attribution.provider_hosts(pool, NOW) == {"s1": "mac1"}
 
 
 def test_unattributed_recent_counts_null_and_unknown_hashes(fake_pool):
@@ -53,7 +63,7 @@ def test_unattributed_recent_counts_null_and_unknown_hashes(fake_pool):
 
 def test_empty_provider_hash_is_not_attributed(fake_pool):
     pool = fake_pool(_vote_rows((1, "", "mac1"), (2, "", "mac1"), (3, None, "mac1")))
-    assert attribution.provider_hosts(pool) == {}
+    assert attribution.provider_hosts(pool, NOW) == {}
 
 
 def test_unique_payouts_prefer_a_populated_hash():
@@ -122,13 +132,13 @@ def test_unattributed_recent_preserves_latest_unique_copy_semantics(fake_pool):
 def test_exact_identity_recovers_dual_host_jobs_and_overrides_wrong_votes(fake_pool):
     rows = _vote_rows((1, 'm1', 'mac1'), (1, 'm1', 'mac2'), (2, 'm3', 'mac1'))
     identities = [{'provider_hash': 'm1', 'host': 'mac1'}, {'provider_hash': 'm3', 'host': 'mac2'}]
-    assert attribution.provider_hosts(fake_pool(rows, identities)) == {'m1': 'mac1', 'm3': 'mac2'}
+    assert attribution.provider_hosts(fake_pool(rows, identities), NOW) == {'m1': 'mac1', 'm3': 'mac2'}
     identities.append({'provider_hash': 'm3', 'host': 'mac1'})
-    assert attribution.provider_hosts(fake_pool(rows, identities)) == {'m1': 'mac1'}
+    assert attribution.provider_hosts(fake_pool(rows, identities), NOW) == {'m1': 'mac1'}
 
 
 def test_sole_m3_identity_attributes_nemotron_session(fake_pool):
     identities = [{"provider_hash": "nemotron-session-hash", "host": "m3-48-1"}]
-    assert attribution.provider_hosts(fake_pool([], identities)) == {
+    assert attribution.provider_hosts(fake_pool([], identities), NOW) == {
         "nemotron-session-hash": "m3-48-1",
     }

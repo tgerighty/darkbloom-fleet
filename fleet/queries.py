@@ -10,14 +10,13 @@ from itertools import pairwise
 
 from psycopg_pool import ConnectionPool
 
-from .attribution import provider_hosts, unattributed_recent, unique_payouts_sql
+from .attribution import DAY_SECONDS, provider_hosts, unattributed_recent, unique_payouts_sql
 from .card import _snapshot_is_stale, build_card
 from .config import Config
 from .health import host_health
 from .hourly import hourly_jobs
 from .routability import latest_self_route, routability_panel
 
-DAY_SECONDS = 86_400
 OUTAGE_GAP_SECONDS = 600
 MAX_DISCOVERED_HOSTS = 32
 # Dashboard serving windows; None = lifetime (since the first snapshot).
@@ -388,8 +387,9 @@ def shared_status_data(
     pool: ConnectionPool,
 ) -> tuple[dict[str, str], tuple[float | None, dict[str, int]], int]:
     """Account-wide status data shared by every host row of one /api/status."""
-    attributed = provider_hosts(pool)
-    return attributed, latest_self_route(pool), unattributed_recent(pool, attributed, time.time())
+    now = time.time()
+    attributed = provider_hosts(pool, now)
+    return attributed, latest_self_route(pool), unattributed_recent(pool, attributed, now)
 
 
 def _owner_aliases(pool: ConnectionPool, host: str) -> set[str]:
