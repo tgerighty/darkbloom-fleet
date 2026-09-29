@@ -50,7 +50,7 @@ describe("host card edges", function () {
     expect(head(renderHost(host(), "24h", ""))).toContain('title="">HEALTHY</span>');
   });
 
-  it("shows LIVE KEEP, ages, empty chips, idle-last serving, inactive slots, and measured switch cost",
+  it("shows LIVE, ages, empty chips, idle-last serving, inactive slots, and measured switch cost",
     function () {
       const html = renderHost(host({
         mode: "LIVE",
@@ -79,8 +79,8 @@ describe("host card edges", function () {
       }), "24h", "");
       const hdr = head(html);
       expect(hdr).toContain(">LIVE</span>");
-      expect(hdr).toContain(">KEEP</span>");
-      expect(hdr.indexOf("badge live")).toBeLessThan(hdr.indexOf("badge proposed"));
+      expect(hdr).not.toContain(">KEEP</span>");
+      expect(hdr).not.toContain("badge proposed");
       expect(html).toContain("s ago");
       expect(html).toContain("m ago");
       expect(html).toContain("✓ EARNING");
@@ -155,7 +155,7 @@ describe("host card edges", function () {
       expect(hours).toContain("configured 9 s");
     });
 
-  it("renders ATTESTING/STALE/OFF, load-error fallbacks, 10-character targets, and payout-free empty tables",
+  it("renders ATTESTING/STALE/OFF, load-error fallbacks, and payout-free empty tables",
     function () {
       expect(renderHost(host({ card: { ...host().card,
         status: { state: "ATTESTING", tone: "amber", detail: "" } } }), "24h", ""))
@@ -169,14 +169,6 @@ describe("host card edges", function () {
         "24h", "");
       expect(load).toContain("load error: load failed");
       expect(load).not.toMatch(/class="band-sub err">load error/);
-      const ten = "1234567890";
-      const eleven = "12345678901";
-      expect(head(renderHost(host({ card: { ...host().card, manager: {
-        mode: "LIVE", fresh: true, current_model: "gemma", target_model: ten } } }), "24h", "")))
-        .toContain(">" + ten + "</span>");
-      expect(head(renderHost(host({ card: { ...host().card, manager: {
-        mode: "LIVE", fresh: true, current_model: "gemma", target_model: eleven } } }), "24h", "")))
-        .toContain(">" + eleven.slice(0, 9) + "…</span>");
     });
 
   it("escapes every remote string in text and attributes, including ampersand quote and backtick",
@@ -219,12 +211,11 @@ describe("host card edges", function () {
       expect(errorCard({ host: {} })).toContain("error");
       expect(errorCard({ host: { label: "Z" }, error: "" }, null)).toContain("error");
       const withCard = renderHost(host({ error: "ignored" }), "24h", "");
-      expect(withCard).toContain("badge proposed");
-      expect(withCard).toContain("KEEP");
+      expect(withCard).not.toContain("badge proposed");
       expect(withCard).not.toContain("ignored");
     });
 
-  it("shows a decision without an error span and a SWITCH with no target as KEEP", function () {
+  it("shows a decision without an error span and omits the retired KEEP badge", function () {
     const html = renderHost(host({
       recent_decisions: [{
         observed_at: NOW, current_model: "gemma", target_model: "llama",
@@ -234,7 +225,7 @@ describe("host card edges", function () {
     expect(html).not.toMatch(/Recent decisions[\s\S]*class="err"/);
     expect(head(renderHost(host({
       recent_decisions: [{ action: "SWITCH", executed: false }],
-    }), "24h", ""))).toContain(">KEEP</span>");
+    }), "24h", ""))).not.toContain(">KEEP</span>");
   });
 
   it("fills empty card fields, host identity, and routability from defaults", function () {

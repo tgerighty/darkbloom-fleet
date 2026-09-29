@@ -71,25 +71,17 @@ describe("high-level band and chips", function () {
 });
 
 describe("no placeholder chrome", function () {
-  it("renders the per-host live manager report", function () {
+  it("omits the per-host live manager report", function () {
     const html = renderHost(host({ card: { ...host().card, manager: {
       running: true, mode: "LIVE", version: "0.1.7", as_of: 1_700_000_000,
       current_model: "gemma", target_model: "qwen", challenger_model: "qwen",
       streak: 2, reason: "3 checks required",
     } } }), "24h", "");
-    expect(html).toContain('data-fold="manager"');
-    expect(html).toContain("Model manager · LIVE");
-    expect(html).toContain("gemma → qwen");
-    expect(html).toContain("qwen · 2/3 checks");
-    expect(html).toContain("3 checks required");
-    const settled = renderHost(host({ card: { ...host().card, manager: {
-      current_model: "qwen", challenger_model: "qwen",
-    } } }), "24h", "");
-    expect(settled).not.toContain("challenger:");
-    const noStreak = renderHost(host({ card: { ...host().card, manager: {
-      current_model: "gemma", challenger_model: "qwen",
-    } } }), "24h", "");
-    expect(noStreak).toContain("qwen · 0/3 checks");
+    expect(html).not.toContain('data-fold="manager"');
+    expect(html).not.toContain("Model manager");
+    expect(html).not.toContain("gemma → qwen");
+    expect(html).not.toContain("challenger:");
+    expect(html).not.toContain("3 checks required");
   });
 
   it("omits both retired shadow panels even if historical data is supplied", function () {
@@ -101,7 +93,7 @@ describe("no placeholder chrome", function () {
     expect(html).not.toContain('data-fold="payout-shadow"');
     expect(html).not.toContain("Payout shadow · OBSERVE");
     expect(html).not.toContain("Recent decisions");
-    expect(html).toContain("Model manager");
+    expect(html).not.toContain("Model manager");
     expect(html).not.toContain("Legacy manager observer");
   });
 
@@ -228,62 +220,20 @@ describe("proposed-action indicator", function () {
     return html.slice(start, band);
   }
 
-  it("follows the live manager instead of the fleet shadow decision", function () {
-    const html = renderHost(host({ recent_decisions: [SWITCH], card: { ...host().card, manager: {
-      mode: "LIVE", fresh: true, current_model: "gemma", target_model: "oss",
-    } } }), "24h", "");
-    expect(head(html)).toContain('title="oss"');
-    expect(head(html)).not.toContain('title="llama"');
-  });
-
-  it("shows KEEP under the mode badge when there is no switch proposal", function () {
-    const html = renderHost(host(), "24h", "");
-    const hdr = head(html);
-    expect(hdr.indexOf("badge observe")).toBeLessThan(hdr.indexOf("badge proposed"));
-    expect(hdr).toContain('role="status"');
-    expect(hdr).toContain('title="KEEP"');
-    expect(hdr).toContain('aria-label="KEEP"');
-    expect(hdr).toContain(">KEEP</span>");
-    expect(html).not.toContain("<button");
-  });
-
-  it("shows KEEP when the live manager recommends the current model", function () {
-    const html = renderHost(host({ recent_decisions: [SWITCH], card: withManager("gemma") }), "24h", "");
-    expect(head(html)).toContain(">KEEP</span>");
-    expect(head(html)).not.toContain("llama");
-  });
-
-  it("shows the live manager target only while the manager is live", function () {
+  it("does not show a KEEP or target proposed badge", function () {
+    const keep = renderHost(host(), "24h", "");
     const switched = renderHost(host({ card: withManager("llama") }), "24h", "");
-    expect(head(switched)).toContain(">llama</span>");
-    expect(head(switched)).toContain('title="llama"');
-    const off = renderHost(host({ card: withManager("llama", "gemma", "OFF") }), "24h", "");
-    expect(head(off)).toContain(">KEEP</span>");
-    const stale = renderHost(host({ card: { ...withManager("llama"), manager: {
-      ...withManager("llama").manager, fresh: false } } }), "24h", "");
-    expect(head(stale)).toContain(">KEEP</span>");
     const shadowOnly = renderHost(host({ recent_decisions: [SWITCH] }), "24h", "");
-    expect(head(shadowOnly)).toContain(">KEEP</span>");
-  });
-
-  it("truncates a long target and keeps the full name in title and aria-label", function () {
-    const target = "gemma-4-26b-qat-4bit";
-    const html = renderHost(host({ card: withManager(target) }), "24h", "");
-    const hdr = head(html);
-    expect(hdr).toContain(">" + target.slice(0, 9) + "…</span>");
-    expect(hdr).toContain('title="' + target + '"');
-    expect(hdr).toContain('aria-label="' + target + '"');
-    expect(hdr).not.toContain(">" + target + "</span>");
-  });
-
-  it("escapes an untrusted proposed target in text and attributes", function () {
-    const target = 'x"><img src=x onerror="alert(1)';
-    const html = renderHost(host({ card: withManager(target) }), "24h", "");
-    const hdr = head(html);
-    expect(hdr).toContain("title=\"x&quot;&gt;&lt;img src=x onerror=&quot;alert(1)\"");
-    expect(hdr).toContain("aria-label=\"x&quot;&gt;&lt;img src=x onerror=&quot;alert(1)\"");
-    expect(hdr).not.toContain("<img src=x");
-    expect(hdr).not.toContain("onerror=\"alert(1)\"");
+    for (const html of [keep, switched, shadowOnly]) {
+      const hdr = head(html);
+      expect(hdr).not.toContain("badge proposed");
+      expect(hdr).not.toContain('title="KEEP"');
+      expect(hdr).not.toContain(">KEEP</span>");
+      expect(html).not.toContain("<button");
+    }
+    expect(head(switched)).not.toContain(">llama</span>");
+    expect(head(keep)).toContain("badge off");
+    expect(head(switched)).toContain("badge live");
   });
 
   it("does not put the proposed indicator on an error card", function () {
@@ -292,14 +242,12 @@ describe("proposed-action indicator", function () {
     expect(html).not.toContain("head-flags");
   });
 
-  it("gives the proposed badge the same size as LIVE/OBSERVE", function () {
+  it("does not style a proposed badge", function () {
     const page = readFileSync(new URL("../fleet/static/dashboard.html", import.meta.url), "utf8");
     const flags = page.match(/\.card-head \.head-flags \{[^}]+\}/)[0];
-    const proposed = page.match(/\.badge\.proposed \{[^}]+\}/)[0];
     expect(flags).toContain("align-items: stretch");
     expect(flags).toContain("text-align: center");
-    expect(proposed).not.toMatch(/font-size:|padding:/);
-    expect(proposed).toContain("border: 1px solid");
+    expect(page).not.toMatch(/\.badge\.proposed \{/);
   });
 
   it("keeps wide demand data and the hourly panel inside the mobile viewport", function () {

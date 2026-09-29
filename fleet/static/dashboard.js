@@ -1,4 +1,4 @@
-import { esc, payoutExpand, renderHosts } from "./host.js?v=11";
+import { esc, payoutExpand, renderHosts } from "./host.js?v=12";
 import {
   captureFocus, captureUiState, fmtAge, makeRefreshGate, mergeDemand, renderDemand, restoreFocus, restoreUiState,
 } from "./ui.js?v=8";
