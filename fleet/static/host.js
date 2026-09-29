@@ -144,17 +144,6 @@ function servingSection(s, windowName) {
     "no model, or no data (1-minute samples)</div>" + renderServing(s.serving?.[windowName]) + FOLD_END;
 }
 
-function managerSection(manager) {
-  const m = manager || { mode: "OFF" };
-  const challenger = m.challenger_model && m.challenger_model !== m.current_model
-    ? '<div class="sub">challenger: ' + esc(m.challenger_model) + " · " + Number(m.streak || 0) + "/3 checks</div>"
-    : "";
-  return '<details class="fold" data-fold="manager"><summary>Model manager · ' + esc(m.mode || "OFF") +
-    (m.version ? " · v" + esc(m.version) : "") + '</summary><div class="sub">' +
-    esc(m.current_model || "–") + " → " + esc(m.target_model || "–") + " · " + fmtAge(m.as_of) +
-    "</div>" + challenger + '<div class="sub">' + esc(m.reason || "no report yet") + "</div></details>";
-}
-
 function slotRow(slot, current, busy) {
   const running = busy && slot.model === current;
   let mtp = "active";
@@ -243,22 +232,14 @@ function latestJobsSection(earnings) {
     '<tbody>' + rows + '</tbody></table></div></details>';
 }
 
-function proposedIndicator(manager) {
-  const liveTarget = manager?.mode === "LIVE" && manager.fresh && manager.target_model !== manager.current_model;
-  const full = liveTarget && manager.target_model ? String(manager.target_model) : "KEEP";
-  const shown = full.length <= 10 ? full : full.slice(0, 9) + "\u2026";
-  return '<span class="badge proposed" role="status" title="' + esc(full) +
-    '" aria-label="' + esc(full) + '">' + esc(shown) + SPAN_END;
-}
-
 function headHtml(s, host, card) {
   const mode = card.manager?.mode || "OFF";
   const health = s.health || { state: "HEALTHY", detail: "" };
   return '<div class="card-head"><h1>' + esc(host.label) + '</h1><span class="sub">' +
     esc(host.spec) + " · daemon " + fmtAge(s.as_of) + '</span><span class="head-flags">' +
     '<span class="badge ' + String(mode).toLowerCase() + '">' + esc(mode) + SPAN_END +
-    '<span class="badge ' + (HEALTH_TONE[health.state] || "ok") + '" title="' + esc(health.detail) + '">' + esc(health.state) + SPAN_END +
-    proposedIndicator(card.manager) + SPAN_DIV_END;
+    '<span class="badge ' + (HEALTH_TONE[health.state] || "ok") + '" title="' + esc(health.detail) + '">' +
+    esc(health.state) + SPAN_END + SPAN_DIV_END;
 }
 
 export function errorCard(s, err) {
@@ -282,8 +263,7 @@ function hostCard(s) {
 
 function hostFolds(s, card, servingWindow, hourlyHtml) {
   const label = (s.host && s.host.label) || "";
-  return managerSection(card.manager) +
-    servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
+  return servingSection(s, servingWindow || "24h") + (hourlyHtml || "") +
     latestJobsSection(s.recent_earnings) + slotsSection(s, card) + trustSection(s.routability || EMPTY_ROUT) + DIV_END +
     payoutsSection(s.recent_earnings || [], s.unattributed_recent || 0, label);
 }

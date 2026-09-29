@@ -57,8 +57,8 @@ describe("dashboard poll and redraw", function () {
       expect(html).toContain("data-host=\"M1\"");
       expect(html).toContain(">OFF</span>");
       expect(html).toContain(">LIVE</span>");
-      expect(html).toContain(">KEEP</span>");
-      expect(html).toContain(">llama</span>");
+      expect(html).not.toContain(">KEEP</span>");
+      expect(html).not.toContain("badge proposed");
       expect(html).toContain("payout-bearing 90-second portion");
       expect(ctx.demand.html).toContain("gemma · M3");
       expect(ctx.subtitle.textContent).toMatch(/^2 hosts · refreshed /);
