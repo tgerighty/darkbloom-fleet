@@ -60,7 +60,11 @@ function safeNodes(html, context) {
 }
 
 function fingerprint(s) {
-  const expand = Array.from(payoutExpand).sort().join(",");
+  const expand = Array.from(payoutExpand).sort(function (a, b) {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+  }).join(",");
   return JSON.stringify(s) + "|" + (pollError ? String(pollError) : "") + "|" + servingWindow + "|" +
     (hourlySectionFn ? "h1" : "h0") + "|" + expand;
 }
