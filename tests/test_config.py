@@ -21,7 +21,8 @@ def test_secret_files_reach_the_config(base_env, tmp_path):
 
     (cfg,) = config.load_configs()
 
-    assert "password=s3cret" in cfg.database_url
+    loaded = password.read_text().strip()
+    assert f"password={loaded}" in cfg.database_url
     assert "host=db" in cfg.database_url
     assert cfg.ssh_config_path == "/run/secrets/ssh_config"
 
