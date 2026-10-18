@@ -1,4 +1,5 @@
 """PostgreSQL regression check; TEMP tables isolate all fixtures from live data."""
+import math
 from contextlib import contextmanager
 from fleet import attribution, config, db, earnings_shadow
 from psycopg.types.json import Jsonb
@@ -35,7 +36,7 @@ with pool.connection() as conn:
     selected = conn.execute(attribution.unique_payouts_sql('provider_hash', 'payout_rowid = 5')).fetchone()
     assert selected['provider_hash'] == 'one'
     with_duplicate = earnings_shadow.build_profile(Pinned(), 'test-m1', 100000)['models']['a']
-    assert with_duplicate['paid_requests'] == 2 and with_duplicate['inference_usd'] == 1.5
+    assert with_duplicate['paid_requests'] == 2 and math.isclose(with_duplicate['inference_usd'], 1.5)
     conn.rollback()
 pool.close()
 print('earnings SQL: exact host attribution, deduplication, base-reward exclusion, failed-loading time passed')

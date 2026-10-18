@@ -1,3 +1,5 @@
+import math
+
 from fleet import card
 
 FRESHNESS = 90.0
@@ -40,7 +42,7 @@ def test_earning_with_hardware_trust_and_traffic_now(fake_pool):
 
 def test_earning_from_a_request_within_the_last_ten_minutes(fake_pool):
     built = _card(fake_pool([{"tokens": 0, "requests": 0}]), _daemon(), last=9_400.0, now=10_000.0)
-    assert built["status"]["state"] == "EARNING" and built["kpis"]["last_served_at"] == 9_400.0
+    assert built["status"]["state"] == "EARNING" and math.isclose(built["kpis"]["last_served_at"], 9_400.0)
     older = _card(fake_pool([{"tokens": 0, "requests": 0}]), _daemon(), last=8_999.0, now=10_000.0)
     assert older["status"]["state"] == "TRUSTED"  # just past the 10-minute window
 
@@ -93,7 +95,7 @@ def test_the_card_surfaces_a_recent_load_error(fake_pool):
                 _daemon(last_model_load_error_model="b", last_model_load_error_message="oom",
                         last_model_load_error_at=9_000.0), now=10_000.0)
     assert old["last_model_load_error"]["recent"] is False
-    assert old["last_model_load_error"]["at"] == 9_000.0
+    assert math.isclose(old["last_model_load_error"]["at"], 9_000.0)
 
 
 def test_session_totals_filters_by_window_and_attributed_sessions(fake_pool):

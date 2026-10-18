@@ -1,5 +1,6 @@
 import io
 import json
+import math
 
 import pytest
 
@@ -100,7 +101,7 @@ def test_malformed_price_rows_are_skipped(monkeypatch):
                "prices": [{"model": "a", "output_price": 100000}, {"model": "b", "output_price": "lots"}, "junk"]}
     monkeypatch.setattr(demand, "_get_json", lambda url: payload)
     prices, fallback = demand.fetch_output_prices("https://x")
-    assert prices == {"a": 0.1} and fallback == 0.2
+    assert prices == {"a": 0.1} and math.isclose(fallback, 0.2)
 
 
 def test_supplied_prices_must_be_a_list(monkeypatch):

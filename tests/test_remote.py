@@ -1,6 +1,7 @@
 """Read-only ingestion parses provider data over SSH; the
 other tests swap subprocess.run or _run_ssh, so none of this needs a network."""
 import dataclasses
+import math
 import subprocess
 
 import pytest
@@ -138,7 +139,7 @@ def test_the_widget_gpu_figure_stands_in_when_capacity_is_absent(monkeypatch):
     daemon = '{"current_model": "a", "warm_models": ["a"], "written_at": 1000, "capacity": {}}'
     _capture(monkeypatch, _state_output(daemon, WIDGET_SAMPLE))
     state = remote.fetch_daemon_state(_cfg(), now=1010.0)
-    assert state.gpu_active_gb == 15.0 and state.gpu_cache_gb is None and state.total_memory_gb is None
+    assert math.isclose(state.gpu_active_gb, 15.0) and state.gpu_cache_gb is None and state.total_memory_gb is None
 
 
 def test_malformed_capacity_and_slots_leave_the_read_intact(monkeypatch):
@@ -182,7 +183,7 @@ def test_non_finite_widget_values_are_dropped():
     from fleet.remote import _optional_float
     assert _optional_float({"x": float("nan")}, "x") is None
     assert _optional_float({"x": float("inf")}, "x") is None
-    assert _optional_float({"x": "0.5"}, "x") == 0.5
+    assert math.isclose(_optional_float({"x": "0.5"}, "x"), 0.5)
 
 
 def test_overflowing_optional_values_do_not_discard_a_daemon_read(monkeypatch):

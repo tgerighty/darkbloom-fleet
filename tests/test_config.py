@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from fleet import config
@@ -43,7 +45,7 @@ def test_invalid_numeric_settings_are_rejected(base_env, name, value):
 def test_zero_is_allowed_where_it_means_something(base_env):
     base_env.setenv("FLEET_SWITCH_COST_SECONDS", "0")
     (cfg,) = config.load_configs()
-    assert cfg.switch_cost_seconds == 0.0
+    assert math.isclose(cfg.switch_cost_seconds, 0.0)
 
 
 def test_duplicate_host_labels_are_rejected(base_env):
