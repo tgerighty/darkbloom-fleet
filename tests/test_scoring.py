@@ -1,3 +1,5 @@
+import math
+
 from fleet.scoring import compute_scores, pressure_from_capacity
 from fleet.types import CapacitySample
 
@@ -9,7 +11,7 @@ def test_pressure_from_capacity_computes_ratio():
 
 def test_pressure_from_capacity_floors_warm_at_one():
     sample = pressure_from_capacity({"id": "m", "active_requests": 5, "warm_providers": 0})
-    assert sample.pressure == 5.0  # divide by max(1, warm), never by zero
+    assert math.isclose(sample.pressure, 5.0)  # divide by max(1, warm), never by zero
 
 
 def test_pressure_from_capacity_skips_rows_without_an_id():
@@ -45,9 +47,9 @@ def test_pressure_from_capacity_parses_optional_tps_fields():
         "id": "m", "active_requests": 2, "warm_providers": 1,
         "aggregate_tps": 55.5, "observed_prefill_tps": 120.0, "observed_decode_tps": 18.25,
     })
-    assert sample.aggregate_tps == 55.5
-    assert sample.observed_prefill_tps == 120.0
-    assert sample.observed_decode_tps == 18.25
+    assert math.isclose(sample.aggregate_tps, 55.5)
+    assert math.isclose(sample.observed_prefill_tps, 120.0)
+    assert math.isclose(sample.observed_decode_tps, 18.25)
 
 
 def test_pressure_from_capacity_accepts_bare_tps_aliases_and_skips_non_finite():
@@ -55,7 +57,7 @@ def test_pressure_from_capacity_accepts_bare_tps_aliases_and_skips_non_finite():
         "id": "m", "active_requests": 1, "warm_providers": 1,
         "prefill_tps": 10, "decode_tps": "nan", "aggregate_tps": "nope",
     })
-    assert sample.observed_prefill_tps == 10.0
+    assert math.isclose(sample.observed_prefill_tps, 10.0)
     assert sample.observed_decode_tps is None
     assert sample.aggregate_tps is None
 

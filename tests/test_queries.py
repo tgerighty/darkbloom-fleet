@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 from fleet import attribution, queries
@@ -102,7 +103,7 @@ def test_named_windows_share_one_history_and_one_now():
     # Counting from 1300 would be 11.1%; dropping the before-row is all idle.
     assert windows["1h"] == {"a": 8.3, "idle": 91.7}
     assert windows["lifetime"] == {"a": 10.8, "idle": 89.2}
-    assert windows["24h"]["idle"] == 99.5
+    assert math.isclose(windows["24h"]["idle"], 99.5)
 
 
 def test_a_gap_inside_a_named_window_counts_as_idle():
@@ -165,7 +166,7 @@ def test_build_status_assembles_every_panel(fake_pool, monkeypatch):
                         switch_cost_seconds=300.0, daemon_freshness_seconds=90.0), pool, attributed, self_route, 2)
     assert status["host"] == {"label": "M3 label", "spec": "M3 Max"} and status["mode"] == "MONITOR"
     assert status["current_model"] == "a" and status["daemon_fresh"] is True
-    assert status["earnings_usd_24h"] == 2.5 and status["earnings_usd_1h"] == 0.5
+    assert math.isclose(status["earnings_usd_24h"], 2.5) and math.isclose(status["earnings_usd_1h"], 0.5)
     assert set(status["serving"]) == {"1h", "7h", "24h", "30d", "lifetime"}
     assert status["serving"]["24h"] == {"idle": 100.0} and status["serving"]["lifetime"] == {}
     assert "recent_decisions" not in status
@@ -203,7 +204,7 @@ def _assert_unique_hash_owned_sql(sql: str) -> None:
 
 def test_earnings_follow_hash_ownership_and_unique_payouts(fake_pool):
     pool = fake_pool([{"total": 1_000_000}], [])
-    assert queries.earnings_usd(pool, 0.0, 100.0, ["s1"]) == 1.0
+    assert math.isclose(queries.earnings_usd(pool, 0.0, 100.0, ["s1"]), 1.0)
     assert queries.recent_earnings(pool, 100.0, ["s1"]) == []
     sum_sql, sum_params = pool.calls[0]
     recent_sql, recent_params = pool.calls[1]
@@ -313,7 +314,7 @@ def test_manager_ranking_uses_saved_blended_scores_and_rejects_stale_data():
         {"model": "oss", "observed_at": 1, "active_requests": 999, "warm_providers": 999},
     ], 1010)
     assert [r["model"] for r in rows] == ["oss", "qwen"]
-    assert rows[0]["blended_usd_per_million"] == .032
+    assert math.isclose(rows[0]["blended_usd_per_million"], .032)
     assert rows[0]["manager_eligible"] is True
     assert rows[1]["active_requests"] == 123 and rows[1]["warm_providers"] == 45
     assert rows[0]["active_requests"] is None and rows[0]["warm_providers"] is None
@@ -341,15 +342,15 @@ def test_manager_demand_lists_all_on_disk_models_with_scope_badges():
     ]
     rows = queries.manager_demand(daemon, live, 1010)
     assert [r["model"] for r in rows] == ["oss", "bonsai", "disk-only"]
-    assert rows[0]["manager_eligible"] is True and rows[0]["score"] == .2
-    assert rows[0]["observed_decode_tps"] == 12.5 and rows[0]["aggregate_tps"] == 100.0
-    assert rows[1]["manager_eligible"] is False and rows[1]["score"] == .08
-    assert rows[1]["average_pressure"] == 2.0 and rows[1]["blended_usd_per_million"] == .04
+    assert rows[0]["manager_eligible"] is True and math.isclose(rows[0]["score"], .2)
+    assert math.isclose(rows[0]["observed_decode_tps"], 12.5) and math.isclose(rows[0]["aggregate_tps"], 100.0)
+    assert rows[1]["manager_eligible"] is False and math.isclose(rows[1]["score"], .08)
+    assert math.isclose(rows[1]["average_pressure"], 2.0) and math.isclose(rows[1]["blended_usd_per_million"], .04)
     assert rows[1]["weight"] == 1
     assert rows[2]["manager_eligible"] is False and rows[2]["active_requests"] == 3
-    assert rows[2]["score"] == 3.0 * .02 * 1.0
-    assert rows[2]["pressure"] == 3.0 and rows[2]["blended_usd_per_million"] == .02
-    assert rows[2]["weight"] == 1.0 and rows[2]["average_pressure"] is None
+    assert math.isclose(rows[2]["score"], 3.0 * .02 * 1.0)
+    assert math.isclose(rows[2]["pressure"], 3.0) and math.isclose(rows[2]["blended_usd_per_million"], .02)
+    assert math.isclose(rows[2]["weight"], 1.0) and rows[2]["average_pressure"] is None
     # Stale snapshot: eligibility cannot be confirmed. Snapshot ranking fields
     # are discarded; display scores come only from fresh live pressure × price.
     live_fresh = [
@@ -360,9 +361,9 @@ def test_manager_demand_lists_all_on_disk_models_with_scope_badges():
     by_model = {r["model"]: r for r in stale}
     assert [r["model"] for r in stale] == ["disk-only", "oss", "bonsai"]
     assert all(r["manager_eligible"] is False for r in stale)
-    assert by_model["oss"]["score"] == 2.0 * .01 * 1.0
+    assert math.isclose(by_model["oss"]["score"], 2.0 * .01 * 1.0)
     assert by_model["oss"]["active_requests"] == 10
-    assert by_model["disk-only"]["score"] == 3.0 * .02 * 1.0
+    assert math.isclose(by_model["disk-only"]["score"], 3.0 * .02 * 1.0)
     assert by_model["bonsai"]["score"] is None
 
 
@@ -379,17 +380,17 @@ def test_manager_demand_computes_ineligible_score_from_snapshot_inputs():
     }
     rows = queries.manager_demand(daemon, [], 1010)
     assert [r["model"] for r in rows] == ["oss", "qwen"]
-    assert rows[0]["manager_eligible"] is True and rows[0]["score"] == .2
-    assert rows[0]["pressure"] == 1.5 and rows[0]["blended_usd_per_million"] == .03
+    assert rows[0]["manager_eligible"] is True and math.isclose(rows[0]["score"], .2)
+    assert math.isclose(rows[0]["pressure"], 1.5) and math.isclose(rows[0]["blended_usd_per_million"], .03)
     assert rows[1]["manager_eligible"] is False
-    assert rows[1]["score"] == 5.0 * .02 * 1.25
-    assert rows[1]["pressure"] == 4.0 and rows[1]["average_pressure"] == 5.0
-    assert rows[1]["weight"] == 1.25
+    assert math.isclose(rows[1]["score"], 5.0 * .02 * 1.25)
+    assert math.isclose(rows[1]["pressure"], 4.0) and math.isclose(rows[1]["average_pressure"], 5.0)
+    assert math.isclose(rows[1]["weight"], 1.25)
     # A present snapshot score is used as-is even when it differs from the inputs.
     snapshot["models"]["qwen"]["score"] = .5
     preferred = {r["model"]: r for r in queries.manager_demand(daemon, [], 1010)}
-    assert preferred["oss"]["manager_eligible"] is True and preferred["oss"]["score"] == .2
-    assert preferred["qwen"]["manager_eligible"] is False and preferred["qwen"]["score"] == .5
+    assert preferred["oss"]["manager_eligible"] is True and math.isclose(preferred["oss"]["score"], .2)
+    assert preferred["qwen"]["manager_eligible"] is False and math.isclose(preferred["qwen"]["score"], .5)
 
 
 def test_build_status_includes_hashes_for_linked_provider_uuid(fake_pool, monkeypatch):

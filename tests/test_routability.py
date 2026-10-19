@@ -1,3 +1,5 @@
+import math
+
 from fleet import routability
 
 
@@ -49,7 +51,7 @@ def test_the_panel_merges_the_host_view_with_the_account_view(fake_pool):
               "started_at": 70.0, "trust_level": "self_signed", "trust_reason": "awaiting MDM verification"}
     self_route = (100.0, {"gemma-4-26b": 1, "gpt-oss-20b": 3, "other-model": 2})
     panel = routability.routability_panel(pool, "h", daemon, 300.0, self_route)
-    assert panel["self_route_as_of"] == 100.0 and panel["last_served_at"] == 90.0
+    assert math.isclose(panel["self_route_as_of"], 100.0) and math.isclose(panel["last_served_at"], 90.0)
     assert (panel["trust_level"], panel["trust_reason"]) == ("self_signed", "awaiting MDM verification")
     # The coordinator's short id (gemma-4-26b) folds into our advertised
     # gemma-4-26b-qat-4bit row; an id matching nothing keeps its own row.

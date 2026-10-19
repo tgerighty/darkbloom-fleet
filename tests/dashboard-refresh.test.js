@@ -118,7 +118,11 @@ describe("demand merge and escape", function () {
       { model: "z", observed_at: 1 },
       { model: "a", observed_at: 1, ema_score: 0 },
     ] }]);
-    expect(unranked.map(function (r) { return r.model; }).sort()).toEqual(["a", "z"]);
+    expect(unranked.map(function (r) { return r.model; }).sort(function (a, b) {
+      if (a < b) return -1;
+      if (a > b) return 1;
+      return 0;
+    })).toEqual(["a", "z"]);
     const html = renderDemand(rows, [
       { current_model: "b", host: { label: "<m>" } },
       { current_model: "b", host: { label: "M1" } },

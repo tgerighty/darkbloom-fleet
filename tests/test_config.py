@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from fleet import config
@@ -21,7 +23,8 @@ def test_secret_files_reach_the_config(base_env, tmp_path):
 
     (cfg,) = config.load_configs()
 
-    assert "password=s3cret" in cfg.database_url
+    loaded = password.read_text().strip()
+    assert f"password={loaded}" in cfg.database_url
     assert "host=db" in cfg.database_url
     assert cfg.ssh_config_path == "/run/secrets/ssh_config"
 
@@ -42,7 +45,7 @@ def test_invalid_numeric_settings_are_rejected(base_env, name, value):
 def test_zero_is_allowed_where_it_means_something(base_env):
     base_env.setenv("FLEET_SWITCH_COST_SECONDS", "0")
     (cfg,) = config.load_configs()
-    assert cfg.switch_cost_seconds == 0.0
+    assert math.isclose(cfg.switch_cost_seconds, 0.0)
 
 
 def test_duplicate_host_labels_are_rejected(base_env):

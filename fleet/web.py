@@ -44,9 +44,10 @@ def create_app(configs: tuple[Config, ...], pool: ConnectionPool) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stop = asyncio.Event()
-        tasks = [asyncio.create_task(run_forever(cfg, pool, stop)) for cfg in configs]
-        tasks += [asyncio.create_task(watch.run_forever(cfg, pool, stop)) for cfg in configs]
-        tasks += [asyncio.create_task(earnings_shadow.run_forever(cfg, pool, stop)) for cfg in configs]
+        run_tasks = [asyncio.create_task(run_forever(cfg, pool, stop)) for cfg in configs]
+        watch_tasks = [asyncio.create_task(watch.run_forever(cfg, pool, stop)) for cfg in configs]
+        shadow_tasks = [asyncio.create_task(earnings_shadow.run_forever(cfg, pool, stop)) for cfg in configs]
+        tasks = run_tasks + watch_tasks + shadow_tasks
         try:
             yield
         finally:

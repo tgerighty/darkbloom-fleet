@@ -1,3 +1,5 @@
+import math
+
 from fleet import hourly
 
 
@@ -71,7 +73,7 @@ def test_current_hour_includes_the_in_progress_portion_at_each_90s_boundary(fake
     rows = [{"hour": hour, "portion": 1, "model": "a", "n": 1}]
     panel = hourly.hourly_jobs(fake_pool(rows), ["s1"], hour + 90.0)
     current = panel["rows"][0]
-    assert current["hour"] == hour
+    assert math.isclose(current["hour"], hour)
     assert current["portions"] == [None, "a"]
     assert current["jobs"] == 1
     assert current["serving_percentage"] == 50
